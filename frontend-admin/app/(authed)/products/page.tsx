@@ -29,6 +29,7 @@ export default function ProductsPage() {
   const toast = useToast();
 
   const parentRef = useRef<HTMLDivElement>(null);
+  const ENABLE_VIRTUAL = records.length > 50;
   const virtualizer = useVirtualizer({
     count: records.length,
     getScrollElement: () => parentRef.current,
@@ -101,6 +102,41 @@ export default function ProductsPage() {
   }
 
   const virtualItems = virtualizer.getVirtualItems();
+
+  function renderRowContent(p: Product, checked: boolean) {
+    const sl = STATUS_LABEL[p.status] ?? STATUS_LABEL.draft;
+    return (
+      <>
+        <div>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => toggle(p.id)}
+            aria-label={`选择 ${p.handle}`}
+          />
+        </div>
+        <div>{p.id}</div>
+        <div className="truncate font-mono text-xs">
+          <Link
+            href={`/products/${p.id}`}
+            className="text-primary underline-offset-2 hover:underline"
+          >
+            {p.handle}
+          </Link>
+        </div>
+        <div className="truncate">{p.title}</div>
+        <div className="truncate text-xs">{p.vendor || "-"}</div>
+        <div>
+          <span className={"inline-block rounded border px-2 py-0.5 text-xs " + sl.cls}>
+            {sl.text}
+          </span>
+        </div>
+        <div className="truncate text-xs text-muted-foreground">
+          {p.createdAt ? new Date(p.createdAt).toLocaleString("zh-CN") : "-"}
+        </div>
+      </>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -192,7 +228,7 @@ export default function ProductsPage() {
             hint="点右上角“新建产品”或“导入 CSV”创建第一个产品"
           />
         </div>
-      ) : (
+      ) : ENABLE_VIRTUAL ? (
         <div ref={parentRef} className="h-[60vh] overflow-auto rounded-b-lg border-x border-b">
           <div
             style={{ height: virtualizer.getTotalSize() }}
@@ -200,7 +236,6 @@ export default function ProductsPage() {
           >
             {virtualItems.map((virtualRow) => {
               const p = records[virtualRow.index];
-              const sl = STATUS_LABEL[p.status] ?? STATUS_LABEL.draft;
               const checked = selected.has(p.id);
               return (
                 <div
@@ -219,37 +254,28 @@ export default function ProductsPage() {
                     (checked ? "bg-primary/5" : "")
                   }
                 >
-                  <div>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggle(p.id)}
-                      aria-label={`选择 ${p.handle}`}
-                    />
-                  </div>
-                  <div>{p.id}</div>
-                  <div className="truncate font-mono text-xs">
-                    <Link
-                      href={`/products/${p.id}`}
-                      className="text-primary underline-offset-2 hover:underline"
-                    >
-                      {p.handle}
-                    </Link>
-                  </div>
-                  <div className="truncate">{p.title}</div>
-                  <div className="truncate text-xs">{p.vendor || "-"}</div>
-                  <div>
-                    <span className={"inline-block rounded border px-2 py-0.5 text-xs " + sl.cls}>
-                      {sl.text}
-                    </span>
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {p.createdAt ? new Date(p.createdAt).toLocaleString("zh-CN") : "-"}
-                  </div>
+                  {renderRowContent(p, checked)}
                 </div>
               );
             })}
           </div>
+        </div>
+      ) : (
+        <div className="rounded-b-lg border-x border-b">
+          {records.map((p) => {
+            const checked = selected.has(p.id);
+            return (
+              <div
+                key={p.id}
+                className={
+                  `grid ${GRID_COLS} items-center border-t px-3 py-2 text-sm hover:bg-muted/30 ` +
+                  (checked ? "bg-primary/5" : "")
+                }
+              >
+                {renderRowContent(p, checked)}
+              </div>
+            );
+          })}
         </div>
       )}
 

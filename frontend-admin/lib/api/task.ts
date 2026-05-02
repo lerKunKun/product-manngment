@@ -75,10 +75,14 @@ export const taskApi = {
   payload: (id: number) => api.get<TaskPayloadResp>(`/task/${id}/payload`),
   /** T10: 重试 FAILED 任务，后端会重置 status 为 PENDING 由 worker 重投。 */
   retry: (id: number) => api.post<number>(`/task/${id}/retry`),
+  /** T19: 取消 PENDING/RUNNING 任务。 */
+  cancel: (id: number) => api.post<void>(`/task/${id}/cancel`, null),
 };
 
 /** T10：后端已实现 POST /task/{id}/retry，可用。 */
 export const TASK_RETRY_AVAILABLE = true;
+/** T19：后端已实现 POST /task/{id}/cancel，可用。 */
+export const TASK_CANCEL_AVAILABLE = true;
 
 export const TASK_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "全部类型" },

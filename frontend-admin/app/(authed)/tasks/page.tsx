@@ -9,6 +9,7 @@ import {
   TASK_TYPE_OPTIONS,
   TASK_STATUS_OPTIONS,
   TASK_RETRY_AVAILABLE,
+  TASK_CANCEL_AVAILABLE,
   isTaskActive,
   relTime,
   durationOf,
@@ -67,6 +68,7 @@ export default function TasksPage() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [retrying, setRetrying] = useState<Record<number, boolean>>({});
+  const [canceling, setCanceling] = useState<Record<number, boolean>>({});
 
   const filtersRef = useRef({ page, type, status, storeId });
   filtersRef.current = { page, type, status, storeId };
@@ -144,6 +146,21 @@ export default function TasksPage() {
       toast.error(`重试失败：${(e as Error).message}`);
     } finally {
       setRetrying((m) => ({ ...m, [id]: false }));
+    }
+  }
+
+  async function onCancel(id: number) {
+    if (!TASK_CANCEL_AVAILABLE) return;
+    if (!window.confirm(`取消任务 #${id}？`)) return;
+    setCanceling((m) => ({ ...m, [id]: true }));
+    try {
+      await taskApi.cancel(id);
+      toast.success(`#${id} 已取消`);
+      load(true);
+    } catch (e) {
+      toast.error(`取消失败：${(e as Error).message}`);
+    } finally {
+      setCanceling((m) => ({ ...m, [id]: false }));
     }
   }
 
@@ -271,6 +288,8 @@ export default function TasksPage() {
                     onToggle={() => toggleExpand(r.id)}
                     onRetry={() => onRetry(r.id)}
                     retrying={!!retrying[r.id]}
+                    onCancel={() => onCancel(r.id)}
+                    canceling={!!canceling[r.id]}
                   >
                     {isOpen &&
                       childrenOf(r.id).map((c) => (
@@ -283,6 +302,8 @@ export default function TasksPage() {
                           onToggle={() => {}}
                           onRetry={() => onRetry(c.id)}
                           retrying={!!retrying[c.id]}
+                          onCancel={() => onCancel(c.id)}
+                          canceling={!!canceling[c.id]}
                         />
                       ))}
                   </TaskRow>
@@ -305,6 +326,8 @@ export default function TasksPage() {
                   onToggle={() => {}}
                   onRetry={() => onRetry(r.id)}
                   retrying={!!retrying[r.id]}
+                  onCancel={() => onCancel(r.id)}
+                  canceling={!!canceling[r.id]}
                 />
               ))}
           </tbody>
@@ -345,6 +368,8 @@ function TaskRow({
   onToggle,
   onRetry,
   retrying,
+  onCancel,
+  canceling,
   children,
 }: {
   r: TaskListItem;
@@ -354,10 +379,14 @@ function TaskRow({
   onToggle: () => void;
   onRetry: () => void;
   retrying: boolean;
+  onCancel: () => void;
+  canceling: boolean;
   children?: React.ReactNode;
 }) {
   const failed = r.status === "FAILED";
+  const cancelable = r.status === "PENDING" || r.status === "RUNNING";
   const retryDisabled = !TASK_RETRY_AVAILABLE || retrying;
+  const cancelDisabled = !TASK_CANCEL_AVAILABLE || canceling;
   return (
     <>
       <tr
@@ -372,7 +401,7 @@ function TaskRow({
               type="button"
               onClick={onToggle}
               className="text-muted-foreground hover:text-foreground"
-              aria-label={expanded ? "收起" : "展开"}
+              aria-label={expanded ? "折叠子任务" : "展开子任务"}
             >
               {expanded ? "▼" : "▶"}
             </button>
@@ -419,6 +448,17 @@ function TaskRow({
                 className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {retrying ? "重试中…" : "重试"}
+              </button>
+            )}
+            {cancelable && (
+              <button
+                type="button"
+                disabled={cancelDisabled}
+                onClick={onCancel}
+                title="取消该任务"
+                className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-xs text-rose-900 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {canceling ? "取消中…" : "取消"}
               </button>
             )}
             <Link

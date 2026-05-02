@@ -445,7 +445,7 @@ function TreeNode({
           <button
             onClick={() => onToggle(node.id)}
             className="inline-flex h-4 w-4 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
-            aria-label={isOpen ? "折叠" : "展开"}
+            aria-label={isOpen ? "折叠子部门" : "展开子部门"}
           >
             {isOpen ? "▾" : "▸"}
           </button>
@@ -469,6 +469,7 @@ function TreeNode({
             onClick={() => onCreateChild(node.id)}
             className="hidden rounded px-1 text-[11px] text-muted-foreground hover:bg-background hover:text-foreground group-hover:inline"
             title="新建子部门"
+            aria-label="新建子部门"
           >
             +
           </button>

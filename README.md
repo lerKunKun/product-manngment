@@ -95,6 +95,7 @@ colima start --cpu 4 --memory 8 --disk 60
 # 4. 端到端冒烟
 ./bin/smoke-test.sh           # 6/6
 ./bin/e2e-saga.sh             # 18/18 一键开店全链路
+./bin/e2e-wave4.sh            # Wave 4 全功能 ~28 步（审批/通知/邮件/归档/监控/admin）
 ```
 
 ### 默认入口

@@ -204,6 +204,25 @@ public class TaskController {
         return Result.ok(t.getId());
     }
 
+    /**
+     * T19: 取消任务。仅 PENDING/RUNNING 可取消；置 CANCELED（与 V10 task.status 枚举一致）。
+     */
+    @PostMapping("/{id}/cancel")
+    public Result<Void> cancel(@PathVariable Long id) {
+        Task t = taskMapper.selectById(id);
+        if (t == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "task " + id);
+        }
+        if (!"PENDING".equals(t.getStatus()) && !"RUNNING".equals(t.getStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                "仅 PENDING/RUNNING 任务可取消，当前 status=" + t.getStatus());
+        }
+        t.setStatus("CANCELED");
+        taskMapper.updateById(t);
+        log.info("[task-cancel] id={}", id);
+        return Result.ok();
+    }
+
     // -------------------------------------------------------------- mapping helpers
 
     /** 列表 item：剔除 payload/result 大字段，截断 errorMessage。 */

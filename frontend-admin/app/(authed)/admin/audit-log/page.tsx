@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { useToast } from "@/components/ui/Toast";
 import {
   LoadingBlock,
   EmptyState,
@@ -13,39 +12,8 @@ import { DateRangePicker } from "@/components/ui/DateRangePicker";
 import { Card } from "@/components/ui/Card";
 
 const PAGE_SIZE = 50;
-const EXPORT_LIMIT = 1000;
 
 type SensitiveFilter = "ALL" | "ONLY" | "EXCLUDE";
-
-const CSV_FIELDS: Array<{ key: keyof SysAuditLog; label: string }> = [
-  { key: "id", label: "id" },
-  { key: "createdAt", label: "createdAt" },
-  { key: "userId", label: "userId" },
-  { key: "username", label: "username" },
-  { key: "employeeNo", label: "employeeNo" },
-  { key: "orgId", label: "orgId" },
-  { key: "tenantId", label: "tenantId" },
-  { key: "module", label: "module" },
-  { key: "action", label: "action" },
-  { key: "resourceType", label: "resourceType" },
-  { key: "resourceId", label: "resourceId" },
-  { key: "requestMethod", label: "requestMethod" },
-  { key: "requestUri", label: "requestUri" },
-  { key: "responseStatus", label: "responseStatus" },
-  { key: "ip", label: "ip" },
-  { key: "sensitive", label: "sensitive" },
-  { key: "userAgent", label: "userAgent" },
-  { key: "requestPayload", label: "requestPayload" },
-];
-
-function csvEscape(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  const s = String(v);
-  if (s.includes(",") || s.includes("\n") || s.includes('"')) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
 
 function tryPrettyJson(s?: string): string {
   if (!s) return "—";
@@ -56,22 +24,7 @@ function tryPrettyJson(s?: string): string {
   }
 }
 
-function ts() {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    d.getFullYear() +
-    pad(d.getMonth() + 1) +
-    pad(d.getDate()) +
-    pad(d.getHours()) +
-    pad(d.getMinutes()) +
-    pad(d.getSeconds())
-  );
-}
-
 export default function AuditLogPage() {
-  const toast = useToast();
-
   const [userId, setUserId] = useState("");
   const [moduleQ, setModuleQ] = useState("");
   const [action, setAction] = useState("");
@@ -86,7 +39,6 @@ export default function AuditLogPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [exporting, setExporting] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const filters = useCallback(() => {
@@ -128,39 +80,9 @@ export default function AuditLogPage() {
     load();
   }
 
-  async function exportCsv() {
-    setExporting(true);
-    try {
-      const resp = await auditLogApi.list({
-        ...filters(),
-        page: 1,
-        size: EXPORT_LIMIT + 1,
-      });
-      const records = resp.records ?? [];
-      if ((resp.total ?? records.length) > EXPORT_LIMIT) {
-        toast.warn("数据过多，请缩小过滤范围（>1000 条）");
-        return;
-      }
-      const header = CSV_FIELDS.map((f) => f.label).join(",");
-      const rows = records.map((r) =>
-        CSV_FIELDS.map((f) => csvEscape(r[f.key])).join(",")
-      );
-      const csv = "﻿" + [header, ...rows].join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `audit-log-${ts()}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success(`已导出 ${records.length} 条`);
-    } catch {
-      /* 全局 toast */
-    } finally {
-      setExporting(false);
-    }
+  function exportCsv() {
+    // T19: 后端流式导出，新窗口直接下载，不再受前端 1000 条限制。
+    window.open(auditLogApi.exportUrl(filters()), "_blank");
   }
 
   const totalPages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
@@ -176,10 +98,10 @@ export default function AuditLogPage() {
         </div>
         <button
           onClick={exportCsv}
-          disabled={exporting || loading}
+          disabled={loading}
           className="rounded-md border px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
         >
-          {exporting ? "导出中…" : "导出 CSV"}
+          导出 CSV
         </button>
       </div>
 
