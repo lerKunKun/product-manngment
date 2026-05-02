@@ -2,8 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
+import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Dialog } from "@/components/ui/Dialog";
 import { LoadingBlock, EmptyState, ErrorBanner } from "@/components/ui/StatusBlocks";
-import { auditArchiveApi, type AuditArchiveLog } from "@/lib/api/auditArchive";
+import { toast } from "@/components/ui/Toast";
+import {
+  auditArchiveApi,
+  type AuditArchiveLog,
+  type BackupStatus,
+} from "@/lib/api/auditArchive";
 import { ApiError } from "@/lib/api/client";
 
 const STATUS_VARIANT: Record<AuditArchiveLog["status"], BadgeVariant> = {
@@ -11,6 +18,8 @@ const STATUS_VARIANT: Record<AuditArchiveLog["status"], BadgeVariant> = {
   SUCCESS: "success",
   FAILED: "error",
 };
+
+const SENSITIVE_ACTION = "AUDIT_ARCHIVE_RUN";
 
 function fmt(dt?: string) {
   if (!dt) return "—";
@@ -22,28 +31,54 @@ function fmtKb(bytes?: number) {
   return `${(bytes / 1024).toFixed(1)} kB`;
 }
 
+/** unix s → "X 小时前" / "X 分钟前" / "—" */
+function formatRelative(unixSeconds?: number) {
+  if (!unixSeconds) return "—";
+  const diffMs = Date.now() - unixSeconds * 1000;
+  if (diffMs < 0) return "—";
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "刚刚";
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const day = Math.floor(hr / 24);
+  return `${day} 天前`;
+}
+
+/** 默认上月，YYYY-MM */
+function defaultMonth() {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
 export default function OpsPage() {
   const [logs, setLogs] = useState<AuditArchiveLog[] | null>(null);
+  const [status, setStatus] = useState<BackupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [endpointMissing, setEndpointMissing] = useState(false);
+
+  const [runOpen, setRunOpen] = useState(false);
+  const [runMonth, setRunMonth] = useState(defaultMonth());
+  const [runCode, setRunCode] = useState("");
+  const [runStep, setRunStep] = useState<"input" | "verify">("input");
+  const [runSubmitting, setRunSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
-    setEndpointMissing(false);
     try {
-      const r = await auditArchiveApi.list();
-      setLogs(Array.isArray(r) ? r : []);
+      const [list, st] = await Promise.all([
+        auditArchiveApi.list(),
+        auditArchiveApi.backupStatus(),
+      ]);
+      setLogs(Array.isArray(list) ? list : []);
+      setStatus(st);
     } catch (e) {
       const err = e as ApiError;
-      // 后端未实现该 endpoint：fallback EmptyState
-      if (err.code === -1 || err.code === 404 || err.code >= 4000) {
-        setEndpointMissing(true);
-        setLogs([]);
-      } else {
-        setError(err.message);
-      }
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -53,19 +88,67 @@ export default function OpsPage() {
     load();
   }, [load]);
 
+  async function handleDownload(id: number) {
+    try {
+      const r = await auditArchiveApi.download(id);
+      window.open(r.url, "_blank");
+      toast.success("下载链接 15 分钟内有效");
+    } catch {
+      /* 全局 toast 已上报 */
+    }
+  }
+
+  function openRun() {
+    setRunMonth(defaultMonth());
+    setRunCode("");
+    setRunStep("input");
+    setRunOpen(true);
+  }
+
+  async function requestCode() {
+    if (!/^\d{4}-\d{2}$/.test(runMonth)) {
+      toast.error("月份格式应为 YYYY-MM");
+      return;
+    }
+    setRunSubmitting(true);
+    try {
+      await auditArchiveApi.requestSensitiveCode(SENSITIVE_ACTION);
+      toast.info("钉钉验证码已下发，请输入");
+      setRunStep("verify");
+    } catch {
+      /* toast handled */
+    } finally {
+      setRunSubmitting(false);
+    }
+  }
+
+  async function confirmRun() {
+    if (!/^\d{6}$/.test(runCode)) {
+      toast.error("请输入 6 位验证码");
+      return;
+    }
+    setRunSubmitting(true);
+    try {
+      const { sensitiveToken } = await auditArchiveApi.verifySensitive(
+        SENSITIVE_ACTION,
+        runCode
+      );
+      await auditArchiveApi.runArchive(runMonth, sensitiveToken);
+      toast.success(`已触发 ${runMonth} 归档`);
+      setRunOpen(false);
+      load();
+    } catch {
+      /* toast handled */
+    } finally {
+      setRunSubmitting(false);
+    }
+  }
+
   const lastArchive = useMemo(() => {
     if (!logs) return undefined;
     return logs
       .filter((l) => l.status === "SUCCESS" && l.finishedAt)
       .sort((a, b) => +new Date(b.finishedAt!) - +new Date(a.finishedAt!))[0];
-  }, [logs]);
-
-  const archiveFail7d = useMemo(() => {
-    if (!logs) return 0;
-    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
-    return logs.filter(
-      (l) => l.status === "FAILED" && l.finishedAt && +new Date(l.finishedAt) >= cutoff
-    ).length;
   }, [logs]);
 
   return (
@@ -78,28 +161,63 @@ export default function OpsPage() {
           </p>
         </div>
         <button
-          disabled
-          title="loopback only，需 SSH 节点 A 调用 POST /api/ops/backup/audit-archive/run"
-          className="rounded-md border px-3 py-2 text-sm opacity-50"
+          type="button"
+          onClick={openRun}
+          className="rounded-md border bg-background px-3 py-2 text-sm hover:bg-muted"
         >
           立即触发归档
         </button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-        <Card title="上次 RDS 备份" value="—" hint="需后端补 GET /admin/ops/backup-status" />
-        <Card
-          title="上次审计归档"
-          value={lastArchive ? fmt(lastArchive.finishedAt) : "—"}
-          hint={lastArchive ? `archiveMonth=${lastArchive.archiveMonth}` : "暂无 SUCCESS 记录"}
-        />
-        <Card title="7 天内备份失败" value="—" hint="需后端补 GET /admin/ops/backup-status" />
-        <Card
-          title="7 天内归档失败"
-          value={String(archiveFail7d)}
-          hint={archiveFail7d > 0 ? "请检查 audit_archive_log" : "正常"}
-          tone={archiveFail7d > 0 ? "error" : "neutral"}
-        />
+        <Card>
+          <CardHeader>
+            <CardDescription>上次 RDS 备份</CardDescription>
+            <CardTitle>{formatRelative(status?.backupLastSuccessSeconds)}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>上次审计归档</CardDescription>
+            <CardTitle>
+              {formatRelative(status?.archiveLastSuccessSeconds)}
+            </CardTitle>
+            {lastArchive && (
+              <div className="text-[11px] text-muted-foreground">
+                archiveMonth={lastArchive.archiveMonth}
+              </div>
+            )}
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>7 天内备份失败</CardDescription>
+            <CardTitle
+              className={
+                (status?.backupFailedCount7d ?? 0) > 0 ? "text-rose-700" : undefined
+              }
+            >
+              {status?.backupFailedCount7d ?? "—"}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>7 天内归档失败</CardDescription>
+            <CardTitle
+              className={
+                (status?.archiveFailedCount7d ?? 0) > 0 ? "text-rose-700" : undefined
+              }
+            >
+              {status?.archiveFailedCount7d ?? "—"}
+            </CardTitle>
+            <div className="text-[11px] text-muted-foreground">
+              {(status?.archiveFailedCount7d ?? 0) > 0
+                ? "请检查 audit_archive_log"
+                : "正常"}
+            </div>
+          </CardHeader>
+        </Card>
       </div>
 
       <ErrorBanner message={error} onRetry={load} />
@@ -114,18 +232,11 @@ export default function OpsPage() {
 
         {loading && <LoadingBlock />}
 
-        {!loading && endpointMissing && (
-          <EmptyState
-            title="暂无归档元数据"
-            hint="需后端补 GET /admin/audit-archive 端点暴露 audit_archive_log 表"
-          />
-        )}
-
-        {!loading && !endpointMissing && (logs?.length ?? 0) === 0 && (
+        {!loading && (logs?.length ?? 0) === 0 && (
           <EmptyState title="暂无归档记录" />
         )}
 
-        {!loading && !endpointMissing && logs && logs.length > 0 && (
+        {!loading && logs && logs.length > 0 && (
           <div className="overflow-hidden rounded-lg border">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
@@ -160,9 +271,10 @@ export default function OpsPage() {
                     <td className="px-3 py-2 text-xs">{fmt(l.finishedAt)}</td>
                     <td className="px-3 py-2">
                       <button
-                        disabled
-                        title="需后端补 GET /admin/audit-archive/{id}/download 预签名 URL"
-                        className="rounded-md border px-2 py-1 text-xs opacity-50"
+                        type="button"
+                        disabled={l.status !== "SUCCESS"}
+                        onClick={() => handleDownload(l.id)}
+                        className="rounded-md border px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         下载
                       </button>
@@ -174,32 +286,87 @@ export default function OpsPage() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
 
-function Card({
-  title,
-  value,
-  hint,
-  tone = "neutral",
-}: {
-  title: string;
-  value: string;
-  hint?: string;
-  tone?: "neutral" | "error";
-}) {
-  return (
-    <div className="rounded-lg border bg-background p-4">
-      <div className="text-xs text-muted-foreground">{title}</div>
-      <div
-        className={
-          "mt-1 text-lg font-semibold " + (tone === "error" ? "text-rose-700" : "text-foreground")
+      <Dialog
+        open={runOpen}
+        onClose={() => !runSubmitting && setRunOpen(false)}
+        title="立即触发审计归档"
+        footer={
+          runStep === "input" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setRunOpen(false)}
+                disabled={runSubmitting}
+                className="rounded-md border px-3 py-1.5 text-sm"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={requestCode}
+                disabled={runSubmitting}
+                className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
+              >
+                获取验证码
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setRunStep("input")}
+                disabled={runSubmitting}
+                className="rounded-md border px-3 py-1.5 text-sm"
+              >
+                上一步
+              </button>
+              <button
+                type="button"
+                onClick={confirmRun}
+                disabled={runSubmitting}
+                className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
+              >
+                确认触发
+              </button>
+            </>
+          )
         }
       >
-        {value}
-      </div>
-      {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
+        {runStep === "input" && (
+          <div className="space-y-2">
+            <label className="block text-xs font-medium">归档月（YYYY-MM）</label>
+            <input
+              type="month"
+              value={runMonth}
+              onChange={(e) => setRunMonth(e.target.value)}
+              className="w-full rounded-md border px-2 py-1.5 text-sm"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              将归档 sys_audit_log 中该月的所有记录到 R2，并删除原表数据。
+            </p>
+          </div>
+        )}
+        {runStep === "verify" && (
+          <div className="space-y-2">
+            <p className="text-xs">
+              已对 <span className="font-mono">AUDIT_ARCHIVE_RUN</span> 下发钉钉验证码，请输入 6 位数字。
+            </p>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={runCode}
+              onChange={(e) => setRunCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="6 位验证码"
+              className="w-full rounded-md border px-2 py-1.5 text-sm font-mono tracking-widest"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              将归档月份：<span className="font-mono">{runMonth}</span>
+            </p>
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 }

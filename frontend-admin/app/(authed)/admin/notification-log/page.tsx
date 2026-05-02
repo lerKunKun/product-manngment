@@ -12,6 +12,13 @@ import {
   type NotificationLog,
 } from "@/lib/api/notificationLog";
 import type { ApiError } from "@/lib/api/client";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+} from "@/components/ui/Card";
 
 const PAGE_SIZE = 50;
 
@@ -133,78 +140,74 @@ export default function NotificationLogPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatCard label="今日 SENT" value={stats.SENT ?? 0} cls="text-emerald-700" />
-        <StatCard label="今日 FAILED" value={stats.FAILED ?? 0} cls="text-rose-700" />
-        <StatCard label="今日 PENDING" value={stats.PENDING ?? 0} cls="text-amber-700" />
+        <StatCard label="今日 SENT" value={stats.SENT ?? 0} cls="text-emerald-600" />
+        <StatCard label="今日 FAILED" value={stats.FAILED ?? 0} cls="text-rose-600" />
+        <StatCard label="今日 PENDING" value={stats.PENDING ?? 0} cls="text-amber-600" />
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-background p-3">
-        <Field label="event_code">
-          <input
-            value={eventCode}
-            onChange={(e) => setEventCode(e.target.value)}
-            placeholder="可选"
-            className="w-40 rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <Field label="渠道">
-          <select
-            value={channel}
-            onChange={(e) => setChannel(e.target.value)}
-            className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+      <Card className="p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="event_code">
+            <input
+              value={eventCode}
+              onChange={(e) => setEventCode(e.target.value)}
+              placeholder="可选"
+              className="w-40 rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </Field>
+          <Field label="渠道">
+            <select
+              value={channel}
+              onChange={(e) => setChannel(e.target.value)}
+              className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              {CHANNEL_OPTIONS.map((o) => (
+                <option key={o.v} value={o.v}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="状态">
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.v} value={o.v}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="userId">
+            <input
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              inputMode="numeric"
+              placeholder="可选"
+              className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </Field>
+          <Field label="时间范围">
+            <DateRangePicker
+              from={from || undefined}
+              to={to || undefined}
+              onChange={(f, t) => {
+                setFrom(f ?? "");
+                setTo(t ?? "");
+              }}
+            />
+          </Field>
+          <button
+            onClick={onSearch}
+            className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
           >
-            {CHANNEL_OPTIONS.map((o) => (
-              <option key={o.v} value={o.v}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="状态">
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
-          >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.v} value={o.v}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="userId">
-          <input
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            inputMode="numeric"
-            placeholder="可选"
-            className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <Field label="开始时间">
-          <input
-            type="datetime-local"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <Field label="结束时间">
-          <input
-            type="datetime-local"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <button
-          onClick={onSearch}
-          className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-        >
-          查询
-        </button>
-      </div>
+            查询
+          </button>
+        </div>
+      </Card>
 
       <ErrorBanner message={error} onRetry={load} />
 
@@ -370,9 +373,13 @@ function StatCard({
   cls: string;
 }) {
   return (
-    <div className="rounded-lg border bg-background p-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={"mt-1 text-2xl font-semibold " + cls}>{value}</div>
-    </div>
+    <Card>
+      <CardHeader className="pb-2">
+        <CardDescription>{label}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className={"text-3xl font-semibold " + cls}>{value}</div>
+      </CardContent>
+    </Card>
   );
 }

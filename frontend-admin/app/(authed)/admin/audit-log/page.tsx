@@ -9,6 +9,8 @@ import {
 } from "@/components/ui/StatusBlocks";
 import { auditLogApi, type SysAuditLog } from "@/lib/api/auditLog";
 import type { ApiError } from "@/lib/api/client";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
+import { Card } from "@/components/ui/Card";
 
 const PAGE_SIZE = 50;
 const EXPORT_LIMIT = 1000;
@@ -181,70 +183,66 @@ export default function AuditLogPage() {
         </button>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-background p-3">
-        <Field label="userId">
-          <input
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            inputMode="numeric"
-            placeholder="可选"
-            className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <Field label="module">
-          <input
-            value={moduleQ}
-            onChange={(e) => setModuleQ(e.target.value)}
-            placeholder="可选"
-            className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <Field label="action">
-          <input
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-            placeholder="可选"
-            className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <Field label="敏感性">
-          <select
-            value={sensitive}
-            onChange={(e) => setSensitive(e.target.value as SensitiveFilter)}
-            className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+      <Card className="p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="userId">
+            <input
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              inputMode="numeric"
+              placeholder="可选"
+              className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </Field>
+          <Field label="module">
+            <input
+              value={moduleQ}
+              onChange={(e) => setModuleQ(e.target.value)}
+              placeholder="可选"
+              className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </Field>
+          <Field label="action">
+            <input
+              value={action}
+              onChange={(e) => setAction(e.target.value)}
+              placeholder="可选"
+              className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </Field>
+          <Field label="敏感性">
+            <select
+              value={sensitive}
+              onChange={(e) => setSensitive(e.target.value as SensitiveFilter)}
+              className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="ALL">全部</option>
+              <option value="ONLY">仅敏感</option>
+              <option value="EXCLUDE">仅非敏感</option>
+            </select>
+          </Field>
+          <Field label="时间范围">
+            <DateRangePicker
+              from={from || undefined}
+              to={to || undefined}
+              onChange={(f, t) => {
+                setFrom(f ?? "");
+                setTo(t ?? "");
+              }}
+            />
+          </Field>
+          <button
+            onClick={onSearch}
+            className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
           >
-            <option value="ALL">全部</option>
-            <option value="ONLY">仅敏感</option>
-            <option value="EXCLUDE">仅非敏感</option>
-          </select>
-        </Field>
-        <Field label="开始时间">
-          <input
-            type="datetime-local"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <Field label="结束时间">
-          <input
-            type="datetime-local"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
-        </Field>
-        <button
-          onClick={onSearch}
-          className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-        >
-          查询
-        </button>
-      </div>
+            查询
+          </button>
+        </div>
+      </Card>
 
       <ErrorBanner message={error} onRetry={load} />
 
-      <div className="overflow-hidden rounded-lg border">
+      <Card className="overflow-hidden p-0">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
@@ -345,7 +343,7 @@ export default function AuditLogPage() {
               })}
           </tbody>
         </table>
-      </div>
+      </Card>
 
       <div className="flex items-center justify-between text-sm">
         <span className="text-muted-foreground">共 {data.total} 条</span>

@@ -4,84 +4,26 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/store";
-import { productApi } from "@/lib/api/product";
-import { storeApi } from "@/lib/api/store";
-import { taskApi, type TaskListItem, relTime } from "@/lib/api/task";
-import { approvalApi } from "@/lib/api/approval";
+import { relTime } from "@/lib/api/task";
 import { notificationLogApi, type NotificationLog } from "@/lib/api/notificationLog";
+import { useDashboardKpis, useFailedTasks } from "@/lib/queries/dashboard";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/StatusBlocks";
-
-type CardData = { value: number | null; loading: boolean };
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
 
-  const [products, setProducts] = useState<CardData>({ value: null, loading: true });
-  const [stores, setStores] = useState<CardData>({ value: null, loading: true });
-  const [pushTasks, setPushTasks] = useState<CardData>({ value: null, loading: true });
-  const [approvals, setApprovals] = useState<CardData>({ value: null, loading: true });
-  const [failed, setFailed] = useState<TaskListItem[]>([]);
-  const [failedLoading, setFailedLoading] = useState(true);
+  const { products, storesActive, tasksToday, approvalsPending } = useDashboardKpis();
+  const failedTasks = useFailedTasks();
+
   const [notifLogs, setNotifLogs] = useState<NotificationLog[] | null>(null);
   const [notifLoading, setNotifLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
-    (async () => {
-      try {
-        const r = await productApi.list(1, 1);
-        if (alive) setProducts({ value: r.total ?? 0, loading: false });
-      } catch {
-        if (alive) setProducts({ value: null, loading: false });
-      }
-    })();
-    (async () => {
-      try {
-        const r = await storeApi.list();
-        const arr = Array.isArray(r) ? r : [];
-        const active = arr.filter((s) => s.status === "ACTIVE").length;
-        if (alive) setStores({ value: active, loading: false });
-      } catch {
-        if (alive) setStores({ value: null, loading: false });
-      }
-    })();
-    (async () => {
-      try {
-        const r = await taskApi.list(1, 100, { type: "PRODUCT_PUSH" });
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const cutoff = startOfDay.getTime();
-        const today = (r.records ?? []).filter((t) => {
-          if (!t.createdAt) return false;
-          const ts = new Date(t.createdAt).getTime();
-          return !isNaN(ts) && ts >= cutoff;
-        }).length;
-        if (alive) setPushTasks({ value: today, loading: false });
-      } catch {
-        if (alive) setPushTasks({ value: null, loading: false });
-      }
-    })();
-    (async () => {
-      try {
-        const r = await approvalApi.myPending();
-        if (alive) setApprovals({ value: (r ?? []).length, loading: false });
-      } catch {
-        if (alive) setApprovals({ value: null, loading: false });
-      }
-    })();
-    (async () => {
-      try {
-        const r = await taskApi.list(1, 5, { status: "FAILED" });
-        if (alive) setFailed(r.records ?? []);
-      } catch {
-        /* ignore */
-      } finally {
-        if (alive) setFailedLoading(false);
-      }
-    })();
     (async () => {
       const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       try {
@@ -104,11 +46,14 @@ export default function DashboardPage() {
   }, []);
 
   const cards = [
-    { title: "产品总数", data: products, href: "/products" },
-    { title: "在线店铺数", data: stores, href: "/stores" },
-    { title: "今日推送任务", data: pushTasks, href: "/tasks" },
-    { title: "待办审批", data: approvals, href: "/approvals" },
+    { title: "产品总数", q: products, href: "/products" },
+    { title: "在线店铺数", q: storesActive, href: "/stores" },
+    { title: "今日推送任务", q: tasksToday, href: "/tasks" },
+    { title: "待办审批", q: approvalsPending, href: "/approvals" },
   ];
+
+  const failed = failedTasks.data ?? [];
+  const failedLoading = failedTasks.isPending;
 
   return (
     <div className="space-y-6">
@@ -116,23 +61,24 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {cards.map((c) => (
-          <button
+          <Card
             key={c.title}
-            type="button"
             onClick={() => router.push(c.href)}
-            className="rounded-lg border bg-background p-4 text-left transition-colors hover:bg-accent/40"
+            className="cursor-pointer transition-shadow hover:shadow-md"
           >
-            <div className="text-xs text-muted-foreground">{c.title}</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">
-              {c.data.loading ? (
-                <Skeleton className="h-8 w-16" />
-              ) : c.data.value === null ? (
+            <CardHeader className="pb-2">
+              <CardDescription>{c.title}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {c.q.isPending ? (
+                <Skeleton className="h-9 w-20" />
+              ) : c.q.data === null || c.q.data === undefined ? (
                 <span className="text-muted-foreground">—</span>
               ) : (
-                c.data.value
+                <div className="text-3xl font-semibold tabular-nums">{c.q.data}</div>
               )}
-            </div>
-          </button>
+            </CardContent>
+          </Card>
         ))}
       </div>
 

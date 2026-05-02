@@ -52,6 +52,22 @@ public class MetricsRegistry {
         gauge("shopifyhub_audit_archive_last_success_seconds").set(unixSeconds);
     }
 
+    /** 返回 backup 上次成功时间（unix s）；未 set 返 null。 */
+    public Long getBackupLastSuccessAt() {
+        AtomicLong h = gauges.get("shopifyhub_backup_last_success_seconds");
+        if (h == null) return null;
+        long v = h.get();
+        return v == 0L ? null : v;
+    }
+
+    /** 返回审计归档上次成功时间（unix s）；未 set 返 null。 */
+    public Long getAuditArchiveLastSuccessAt() {
+        AtomicLong h = gauges.get("shopifyhub_audit_archive_last_success_seconds");
+        if (h == null) return null;
+        long v = h.get();
+        return v == 0L ? null : v;
+    }
+
     private Counter counter(String name, String tagKey, String tagVal) {
         String key = name + "|" + tagKey + "=" + tagVal;
         return counters.computeIfAbsent(key, k ->

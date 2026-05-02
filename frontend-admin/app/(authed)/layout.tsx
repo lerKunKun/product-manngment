@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/auth/store";
 import { AppShell } from "@/components/layout/AppShell";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -14,6 +15,19 @@ export default function AuthedLayout({
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const accessToken = useAuthStore((s) => s.accessToken);
+
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 30_000,
+            refetchOnWindowFocus: false,
+            retry: 1,
+          },
+        },
+      })
+  );
 
   useEffect(() => {
     if (!user || !accessToken) {
@@ -30,8 +44,10 @@ export default function AuthedLayout({
   }
 
   return (
-    <AppShell>
-      <ErrorBoundary>{children}</ErrorBoundary>
-    </AppShell>
+    <QueryClientProvider client={queryClient}>
+      <AppShell>
+        <ErrorBoundary>{children}</ErrorBoundary>
+      </AppShell>
+    </QueryClientProvider>
   );
 }

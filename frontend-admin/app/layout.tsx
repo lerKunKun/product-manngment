@@ -14,6 +14,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try { var t = localStorage.getItem("theme"); var d = t === "dark" || (!t && window.matchMedia("(prefers-color-scheme: dark)").matches); if (d) document.documentElement.classList.add("dark"); } catch (e) {}`,
+          }}
+        />
+      </head>
       <body className="min-h-screen bg-background font-sans antialiased">
         <ToastProvider>{children}</ToastProvider>
       </body>

@@ -7,6 +7,7 @@ import { useAuthStore } from "@/lib/auth/store";
 import { authApi } from "@/lib/api/auth";
 import { inboxApi } from "@/lib/api/inbox";
 import { cn } from "@/lib/utils";
+import { Sheet, SheetHeader, SheetTitle, SheetContent } from "@/components/ui/Sheet";
 
 const NAV_GROUPS: {
   section: string | null;
@@ -65,12 +66,61 @@ const NAV_GROUPS: {
   },
 ];
 
+function NavList({
+  pathname,
+  onLinkClick,
+}: {
+  pathname: string;
+  onLinkClick?: () => void;
+}) {
+  return (
+    <nav className="space-y-4">
+      {NAV_GROUPS.map((g, gi) => (
+        <div key={gi} className="space-y-0.5">
+          {g.section && (
+            <div className="px-3 pb-1 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
+              {g.section}
+            </div>
+          )}
+          {g.items.map((it) => {
+            const active =
+              pathname === it.href || pathname.startsWith(it.href + "/");
+            return (
+              <Link
+                key={it.href}
+                href={it.href}
+                onClick={onLinkClick}
+                className={cn(
+                  "block rounded-md px-3 py-2 text-sm transition-colors",
+                  active
+                    ? "bg-primary text-primary-foreground"
+                    : "text-foreground hover:bg-accent"
+                )}
+              >
+                {it.label}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
   const [unread, setUnread] = useState(0);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    setTheme(
+      document.documentElement.classList.contains("dark") ? "dark" : "light"
+    );
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -90,6 +140,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  function toggleTheme() {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.classList.toggle("dark", next === "dark");
+    try {
+      localStorage.setItem("theme", next);
+    } catch {
+      /* ignore */
+    }
+    setTheme(next);
+  }
+
   async function handleLogout() {
     try {
       await authApi.logout();
@@ -102,44 +163,47 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r bg-muted/30 px-3 py-4">
+      <aside className="hidden w-56 shrink-0 border-r bg-muted/30 px-3 py-4 md:flex md:flex-col">
         <div className="mb-6 px-2">
           <div className="text-sm font-semibold">Biou × Shopify Hub</div>
           <div className="text-xs text-muted-foreground">v0.1.0-alpha</div>
         </div>
-        <nav className="space-y-4">
-          {NAV_GROUPS.map((g, gi) => (
-            <div key={gi} className="space-y-0.5">
-              {g.section && (
-                <div className="px-3 pb-1 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {g.section}
-                </div>
-              )}
-              {g.items.map((it) => {
-                const active =
-                  pathname === it.href || pathname.startsWith(it.href + "/");
-                return (
-                  <Link
-                    key={it.href}
-                    href={it.href}
-                    className={cn(
-                      "block rounded-md px-3 py-2 text-sm transition-colors",
-                      active
-                        ? "bg-primary text-primary-foreground"
-                        : "text-foreground hover:bg-accent"
-                    )}
-                  >
-                    {it.label}
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
+        <NavList pathname={pathname} />
       </aside>
+      <Sheet
+        open={mobileNavOpen}
+        onOpenChange={setMobileNavOpen}
+        side="left"
+      >
+        <SheetHeader>
+          <SheetTitle>Biou × Shopify Hub</SheetTitle>
+        </SheetHeader>
+        <SheetContent>
+          <NavList
+            pathname={pathname}
+            onLinkClick={() => setMobileNavOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
       <div className="flex flex-1 flex-col">
-        <header className="flex h-14 items-center justify-end border-b bg-background px-6">
+        <header className="flex h-14 items-center justify-between border-b bg-background px-4 md:justify-end md:px-6">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="rounded-md border p-1.5 text-sm hover:bg-accent md:hidden"
+            aria-label="菜单"
+          >
+            ☰
+          </button>
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label="切换主题"
+              className="rounded-md border bg-background p-1.5 text-sm hover:bg-accent"
+            >
+              {theme === "dark" ? "☀️" : "🌙"}
+            </button>
             <button
               type="button"
               aria-label="通知中心"
