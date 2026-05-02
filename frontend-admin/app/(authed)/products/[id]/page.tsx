@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { productApi, type ProductDetail, type ExternalLink, type PurchaseRow, type ProductDoc, type ProductVariant } from "@/lib/api/product";
+import { productApi, type ProductDetail, type ExternalLink, type ProductDoc, type ProductVariant } from "@/lib/api/product";
 import type { ApiError } from "@/lib/api/client";
 import { RichTextEditor } from "@/components/editor/RichTextEditor";
 import { SnapshotTriggerDialog } from "@/components/snapshot/SnapshotTriggerDialog";
 import { PushTriggerDialog } from "@/components/push/PushTriggerDialog";
 import { StoreMappingPanel } from "@/components/product/StoreMappingPanel";
+import { PurchaseTab } from "@/components/product/PurchaseTab";
 import { PreviewButton } from "@/components/preview/PreviewButton";
 
 type Tab = "basic" | "variants" | "images" | "links" | "purchase" | "docs" | "mapping" | "seo";
@@ -376,78 +377,6 @@ function LinksTab({ productId }: { productId: number }) {
         </table>
       </div>
       <p className="text-xs text-muted-foreground">仅记录链接，不抓取内容（隐私 + 反爬合规）。</p>
-    </div>
-  );
-}
-
-function PurchaseTab({ productId }: { productId: number }) {
-  const [rows, setRows] = useState<PurchaseRow[]>([]);
-  const [editing, setEditing] = useState<number | null>(null);
-  const [draft, setDraft] = useState<Partial<PurchaseRow>>({});
-  const [msg, setMsg] = useState("");
-
-  async function load() { setRows(await productApi.purchaseList(productId)); }
-  useEffect(() => { load(); }, [productId]);
-
-  async function save() {
-    if (!editing) return;
-    try { await productApi.purchaseUpsert(editing, draft); setMsg("✓ 已保存"); setEditing(null); setDraft({}); load(); }
-    catch (e) { setMsg((e as ApiError).message); }
-  }
-
-  return (
-    <div className="space-y-3">
-      {msg && <p className={"text-sm " + (msg.startsWith("✓") ? "text-emerald-700" : "text-destructive")}>{msg}</p>}
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-2 py-2 text-left">SKU</th>
-              <th className="px-2 py-2 text-left">变体</th>
-              <th className="px-2 py-2 text-right">售价</th>
-              <th className="px-2 py-2 text-right">采购成本</th>
-              <th className="px-2 py-2 text-right">克重</th>
-              <th className="px-2 py-2 text-left">物流标签</th>
-              <th className="px-2 py-2 text-left">采购链接</th>
-              <th className="px-2 py-2 text-right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">暂无采购数据</td></tr>}
-            {rows.map((r) => (
-              editing === r.variantId ? (
-                <tr key={r.variantId} className="border-t bg-primary/5">
-                  <td className="px-2 py-2 font-mono text-xs">{r.sku}</td>
-                  <td className="px-2 py-2 text-xs">{[r.option1, r.option2].filter(Boolean).join("/") || "-"}</td>
-                  <td className="px-2 py-2 text-right">{r.price}</td>
-                  <td className="px-2 py-2"><input type="number" step="0.01" value={String(draft.cost ?? "")} onChange={(e) => setDraft({...draft, cost: e.target.value as unknown as number})} className={inpSm + " w-24 text-right"} /></td>
-                  <td className="px-2 py-2"><input type="number" step="0.01" value={String(draft.grossWeight ?? "")} onChange={(e) => setDraft({...draft, grossWeight: e.target.value as unknown as number})} className={inpSm + " w-20 text-right"} /></td>
-                  <td className="px-2 py-2"><input value={draft.logisticsTags ?? ""} onChange={(e) => setDraft({...draft, logisticsTags: e.target.value})} className={inpSm} placeholder='["液体","带电"]' /></td>
-                  <td className="px-2 py-2"><input value={draft.purchaseUrl ?? ""} onChange={(e) => setDraft({...draft, purchaseUrl: e.target.value})} className={inpSm} placeholder="1688..." /></td>
-                  <td className="px-2 py-2 text-right whitespace-nowrap">
-                    <button onClick={save} className="mr-1 rounded border px-2 py-1 text-xs hover:bg-accent">保存</button>
-                    <button onClick={() => { setEditing(null); setDraft({}); }} className="rounded border px-2 py-1 text-xs hover:bg-accent">取消</button>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={r.variantId} className="border-t">
-                  <td className="px-2 py-2 font-mono text-xs">{r.sku}</td>
-                  <td className="px-2 py-2 text-xs">{[r.option1, r.option2].filter(Boolean).join("/") || "-"}</td>
-                  <td className="px-2 py-2 text-right">{r.price}</td>
-                  <td className="px-2 py-2 text-right">{r.cost ?? "-"}</td>
-                  <td className="px-2 py-2 text-right">{r.grossWeight ?? "-"}</td>
-                  <td className="px-2 py-2 text-xs">{r.logisticsTags ?? "-"}</td>
-                  <td className="px-2 py-2 text-xs">{r.purchaseUrl ? <a href={r.purchaseUrl} target="_blank" rel="noreferrer" className="text-primary underline-offset-2 hover:underline">查看</a> : "-"}</td>
-                  <td className="px-2 py-2 text-right">
-                    <button onClick={() => { setEditing(r.variantId); setDraft(r); }} className="rounded border px-2 py-1 text-xs hover:bg-accent">编辑</button>
-                  </td>
-                </tr>
-              )
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-muted-foreground">采购信息按变体维度；改 SKU 走"变体 → 改 SKU"按钮（钉钉验证码二次确认）。</p>
     </div>
   );
 }

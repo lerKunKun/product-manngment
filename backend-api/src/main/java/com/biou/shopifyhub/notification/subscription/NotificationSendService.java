@@ -3,6 +3,7 @@ package com.biou.shopifyhub.notification.subscription;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.biou.shopifyhub.core.entity.SysUser;
 import com.biou.shopifyhub.core.mapper.SysUserMapper;
+import com.biou.shopifyhub.core.metrics.MetricsRegistry;
 import com.biou.shopifyhub.notification.EmailService;
 import com.biou.shopifyhub.notification.inapp.InappBridge;
 import com.biou.shopifyhub.notification.subscription.entity.NotificationLog;
@@ -38,6 +39,7 @@ public class NotificationSendService {
     private final MultiCorpDingTalkResolver dingResolver;
     private final EmailService emailService;
     private final InappBridge inappBridge;
+    private final MetricsRegistry metricsRegistry;
 
     @Autowired
     public NotificationSendService(SubscriptionService subscriptionService,
@@ -45,13 +47,15 @@ public class NotificationSendService {
                                    NotificationLogMapper logMapper,
                                    MultiCorpDingTalkResolver dingResolver,
                                    EmailService emailService,
-                                   InappBridge inappBridge) {
+                                   InappBridge inappBridge,
+                                   MetricsRegistry metricsRegistry) {
         this.subscriptionService = subscriptionService;
         this.userMapper = userMapper;
         this.logMapper = logMapper;
         this.dingResolver = dingResolver;
         this.emailService = emailService;
         this.inappBridge = inappBridge;
+        this.metricsRegistry = metricsRegistry;
     }
 
     /**
@@ -163,6 +167,7 @@ public class NotificationSendService {
         upd.setStatus("SENT");
         upd.setSentAt(LocalDateTime.now());
         logMapper.updateById(upd);
+        metricsRegistry.incrNotificationSend("sent");
     }
 
     private void markFailed(Long id, String err, int attempt) {
@@ -177,6 +182,7 @@ public class NotificationSendService {
             upd.setNextRetryAt(null);
         }
         logMapper.updateById(upd);
+        metricsRegistry.incrNotificationSend("failed");
     }
 
     private void markSkipped(Long id, String reason) {
@@ -185,6 +191,7 @@ public class NotificationSendService {
         upd.setStatus("SKIPPED");
         upd.setErrorMsg(snip(reason, 1024));
         logMapper.updateById(upd);
+        metricsRegistry.incrNotificationSend("skipped");
     }
 
     public List<NotificationLog> findReadyForRetry(int limit) {

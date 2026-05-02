@@ -8,6 +8,7 @@ import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.entity.SysUser;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.core.mapper.SysUserMapper;
+import com.biou.shopifyhub.core.metrics.MetricsRegistry;
 import com.biou.shopifyhub.core.security.JwtUtil;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -33,13 +34,15 @@ public class AuthServiceImpl implements AuthService {
     private final JwtUtil jwtUtil;
     private final StringRedisTemplate redis;
     private final MeterRegistry meterRegistry;
+    private final MetricsRegistry metricsRegistry;
 
     public AuthServiceImpl(SysUserMapper userMapper, JwtUtil jwtUtil, StringRedisTemplate redis,
-                           MeterRegistry meterRegistry) {
+                           MeterRegistry meterRegistry, MetricsRegistry metricsRegistry) {
         this.userMapper = userMapper;
         this.jwtUtil = jwtUtil;
         this.redis = redis;
         this.meterRegistry = meterRegistry;
+        this.metricsRegistry = metricsRegistry;
     }
 
     @Override
@@ -48,6 +51,7 @@ public class AuthServiceImpl implements AuthService {
         String currentFails = redis.opsForValue().get(failKey);
         if (currentFails != null && Integer.parseInt(currentFails) >= MAX_FAILS) {
             meterRegistry.counter("shopifyhub.auth.login", "result", "fail", "reason", "locked").increment();
+            metricsRegistry.incrAuthLogin("fail");
             throw new BusinessException(ResultCode.AUTH_LOCKED_TOO_MANY_ATTEMPTS);
         }
 
@@ -56,15 +60,18 @@ public class AuthServiceImpl implements AuthService {
             || !BCrypt.checkpw(req.getPassword(), user.getPasswordHash())) {
             recordFail(failKey);
             meterRegistry.counter("shopifyhub.auth.login", "result", "fail", "reason", "bad_credentials").increment();
+            metricsRegistry.incrAuthLogin("fail");
             throw new BusinessException(ResultCode.AUTH_BAD_CREDENTIALS);
         }
 
         if ("FROZEN".equals(user.getStatus())) {
             meterRegistry.counter("shopifyhub.auth.login", "result", "fail", "reason", "frozen").increment();
+            metricsRegistry.incrAuthLogin("fail");
             throw new BusinessException(ResultCode.AUTH_ACCOUNT_FROZEN);
         }
         if ("EXPIRED".equals(user.getStatus())) {
             meterRegistry.counter("shopifyhub.auth.login", "result", "fail", "reason", "expired").increment();
+            metricsRegistry.incrAuthLogin("fail");
             throw new BusinessException(ResultCode.AUTH_ACCOUNT_EXPIRED);
         }
 
@@ -75,6 +82,7 @@ public class AuthServiceImpl implements AuthService {
             user.setExpiredAt(LocalDateTime.now());
             userMapper.updateById(user);
             meterRegistry.counter("shopifyhub.auth.login", "result", "fail", "reason", "temp_expired").increment();
+            metricsRegistry.incrAuthLogin("fail");
             throw new BusinessException(ResultCode.AUTH_ACCOUNT_EXPIRED);
         }
 
@@ -103,6 +111,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         meterRegistry.counter("shopifyhub.auth.login", "result", "success").increment();
+        metricsRegistry.incrAuthLogin("success");
         return new LoginResponse(
             user.getId(),
             user.getUsername(),

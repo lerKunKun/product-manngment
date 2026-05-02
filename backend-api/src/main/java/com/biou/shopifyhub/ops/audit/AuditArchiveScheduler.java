@@ -1,6 +1,7 @@
 package com.biou.shopifyhub.ops.audit;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.biou.shopifyhub.core.metrics.MetricsRegistry;
 import com.biou.shopifyhub.core.security.AesGcmUtil;
 import com.biou.shopifyhub.file.FileService;
 import com.biou.shopifyhub.notification.NotificationDispatcher;
@@ -52,6 +53,7 @@ public class AuditArchiveScheduler {
     private final JdbcTemplate jdbc;
     private final FileService fileService;
     private final NotificationDispatcher notifier;
+    private final MetricsRegistry metricsRegistry;
 
     @Value("${ops.audit-archive-bucket:${R2_AUDIT_ARCHIVE_BUCKET:audit-archive}}")
     private String archiveBucket;
@@ -65,11 +67,13 @@ public class AuditArchiveScheduler {
     public AuditArchiveScheduler(AuditArchiveLogMapper archiveMapper,
                                  JdbcTemplate jdbc,
                                  FileService fileService,
-                                 NotificationDispatcher notifier) {
+                                 NotificationDispatcher notifier,
+                                 MetricsRegistry metricsRegistry) {
         this.archiveMapper = archiveMapper;
         this.jdbc = jdbc;
         this.fileService = fileService;
         this.notifier = notifier;
+        this.metricsRegistry = metricsRegistry;
     }
 
     @Scheduled(cron = "${ops.audit-archive-cron:0 30 2 1 * *}")
@@ -116,6 +120,7 @@ public class AuditArchiveScheduler {
                 row.setStatus("SUCCESS");
                 row.setFinishedAt(LocalDateTime.now());
                 archiveMapper.updateById(row);
+                metricsRegistry.setAuditArchiveLastSuccess(System.currentTimeMillis() / 1000L);
                 log.info("[audit-archive] month={} no rows; mark SUCCESS empty", monthKey);
                 return row;
             }
@@ -138,6 +143,7 @@ public class AuditArchiveScheduler {
             row.setStatus("SUCCESS");
             row.setFinishedAt(LocalDateTime.now());
             archiveMapper.updateById(row);
+            metricsRegistry.setAuditArchiveLastSuccess(System.currentTimeMillis() / 1000L);
 
             int deleted = jdbc.update(
                 "DELETE FROM sys_audit_log WHERE created_at >= ? AND created_at < ?", start, end);

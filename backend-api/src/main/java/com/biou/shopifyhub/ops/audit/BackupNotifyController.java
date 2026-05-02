@@ -3,6 +3,7 @@ package com.biou.shopifyhub.ops.audit;
 import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
+import com.biou.shopifyhub.core.metrics.MetricsRegistry;
 import com.biou.shopifyhub.notification.NotificationDispatcher;
 import com.biou.shopifyhub.notification.NotificationEventCode;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,14 +32,17 @@ public class BackupNotifyController {
 
     private final NotificationDispatcher notifier;
     private final AuditArchiveScheduler auditArchive;
+    private final MetricsRegistry metricsRegistry;
 
     @Value("${ops.notify-fallback-user-id:0}")
     private Long fallbackUserId;
 
     public BackupNotifyController(NotificationDispatcher notifier,
-                                  AuditArchiveScheduler auditArchive) {
+                                  AuditArchiveScheduler auditArchive,
+                                  MetricsRegistry metricsRegistry) {
         this.notifier = notifier;
         this.auditArchive = auditArchive;
+        this.metricsRegistry = metricsRegistry;
     }
 
     @PostMapping("/notify-fail")
@@ -59,6 +63,7 @@ public class BackupNotifyController {
     public Result<Void> notifySuccess(@RequestBody NotifySuccessBody body, HttpServletRequest req) {
         assertLoopback(req);
         log.info("[backup-success] date={} bytes={} sha={}", body.date(), body.bytes(), body.sha256());
+        metricsRegistry.setBackupLastSuccess(System.currentTimeMillis() / 1000L);
         return Result.ok();
     }
 

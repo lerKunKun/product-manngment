@@ -34,10 +34,10 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/invitation/accept").permitAll()
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/oauth/**", "/webhook/**", "/internal/asset/**").permitAll()
+                .requestMatchers("/internal/**").permitAll()
                 .requestMatchers("/ops/backup/**").permitAll()
-                // Wave 0 阶段：未登录可访问的开放路径列表 ↑；其余需要 JWT
-                // Wave 1 后期：开启严格鉴权，去掉 anyRequest().permitAll()
-                .anyRequest().permitAll()      // TODO: 改 .authenticated() 在 W1-RBAC 完成后
+                // T1：开放路径列表 ↑；其余必须带 JWT
+                .anyRequest().authenticated()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
             .formLogin(form -> form.disable())

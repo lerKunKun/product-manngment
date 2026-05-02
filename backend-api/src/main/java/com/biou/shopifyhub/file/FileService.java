@@ -2,6 +2,7 @@ package com.biou.shopifyhub.file;
 
 import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
+import com.biou.shopifyhub.core.metrics.MetricsRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,6 +45,7 @@ public class FileService {
 
     private final S3Client s3;
     private final S3Presigner presigner;
+    private final MetricsRegistry metricsRegistry;
 
     @Value("${R2_BUCKET:shopify-themes}")
     private String bucket;
@@ -54,9 +56,10 @@ public class FileService {
     @Value("${R2_PUBLIC_BASE:}")
     private String publicBase;
 
-    public FileService(S3Client s3, S3Presigner presigner) {
+    public FileService(S3Client s3, S3Presigner presigner, MetricsRegistry metricsRegistry) {
         this.s3 = s3;
         this.presigner = presigner;
+        this.metricsRegistry = metricsRegistry;
     }
 
     /** 上传产品图片到 R2 product-media 桶 → 返回可访问 URL */
@@ -115,7 +118,9 @@ public class FileService {
                 req.contentType(contentType);
             }
             s3.putObject(req.build(), RequestBody.fromBytes(body));
+            metricsRegistry.incrR2Upload("success");
         } catch (Exception e) {
+            metricsRegistry.incrR2Upload("fail");
             throw new IOException("R2 putObject failed key=" + key + ": " + e.getMessage(), e);
         }
     }

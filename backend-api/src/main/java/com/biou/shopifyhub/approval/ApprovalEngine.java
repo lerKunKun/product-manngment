@@ -6,6 +6,7 @@ import com.biou.shopifyhub.approval.entity.ApprovalLog;
 import com.biou.shopifyhub.approval.mapper.ApprovalFlowMapper;
 import com.biou.shopifyhub.approval.mapper.ApprovalLogMapper;
 import com.biou.shopifyhub.core.ResultCode;
+import com.biou.shopifyhub.core.entity.SysRole;
 import com.biou.shopifyhub.core.entity.SysUserRole;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.core.mapper.SysRoleMapper;
@@ -251,11 +252,26 @@ public class ApprovalEngine {
         if (f.getCurrentApproverId() != null) {
             notifier.notifyUser(f.getCurrentApproverId(),
                 NotificationEventCode.APPROVAL_PENDING, subject, text, renderHtml(subject, text, ctx));
-        } else if (f.getCurrentApproverRole() != null) {
-            // 任一角色签批模式：暂仅打日志（生产应展开为该角色全员发通知；W4-APP-04 调度独立追加）
-            log.info("[approval-pending-role] flowId={} role={} subject={}",
-                f.getId(), f.getCurrentApproverRole(), subject);
+            return;
         }
+        if (f.getCurrentApproverRole() == null || f.getCurrentApproverRole().isBlank()) return;
+
+        // 任一角色签批模式：展开为该角色全员发通知
+        SysRole role = roleMapper.selectOne(new LambdaQueryWrapper<SysRole>()
+            .eq(SysRole::getCode, f.getCurrentApproverRole()));
+        if (role == null) {
+            log.warn("[approval-pending-role] role not found: {}", f.getCurrentApproverRole());
+            return;
+        }
+        List<Long> userIds = userRoleMapper.selectList(
+            new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getRoleId, role.getId())
+        ).stream().map(SysUserRole::getUserId).distinct().toList();
+        if (userIds.isEmpty()) {
+            log.warn("[approval-pending-role] role {} has no users", f.getCurrentApproverRole());
+            return;
+        }
+        notifier.notifyUsers(userIds, NotificationEventCode.APPROVAL_PENDING, subject,
+            text, renderHtml(subject, text, ctx));
     }
 
     private void notifyApplicant(ApprovalFlow f, String subject, String text) {

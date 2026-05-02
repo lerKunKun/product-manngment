@@ -32,7 +32,7 @@ export default function ApprovalDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
-  const [resubmitJson, setResubmitJson] = useState("");
+  const [editingPayload, setEditingPayload] = useState<Record<string, unknown>>({});
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -41,7 +41,7 @@ export default function ApprovalDetailPage() {
     try {
       const d = await approvalApi.get(id);
       setDetail(d);
-      setResubmitJson(JSON.stringify(d.flow.payload ?? {}, null, 2));
+      setEditingPayload((d.flow.payload as Record<string, unknown>) ?? {});
     } catch (e) {
       setError((e as ApiError).message);
     } finally {
@@ -76,15 +76,8 @@ export default function ApprovalDetailPage() {
     }
   }
   async function resubmit() {
-    let payload: Record<string, unknown>;
     try {
-      payload = JSON.parse(resubmitJson);
-    } catch {
-      toast.error("payload 不是合法 JSON");
-      return;
-    }
-    try {
-      await approvalApi.resubmit(id, payload);
+      await approvalApi.resubmit(id, editingPayload);
       toast.success("已重新提交");
       load();
     } catch {
@@ -209,10 +202,10 @@ export default function ApprovalDetailPage() {
           {canResubmit && (
             <>
               <div className="mb-2 text-sm font-medium">修改 payload 后重新提交</div>
-              <textarea
-                value={resubmitJson}
-                onChange={(e) => setResubmitJson(e.target.value)}
-                className="h-44 w-full rounded-md border bg-background p-2 font-mono text-xs"
+              <PayloadForm
+                type={f.type}
+                payload={editingPayload}
+                onChange={setEditingPayload}
               />
               <button
                 onClick={resubmit}
@@ -264,5 +257,116 @@ export default function ApprovalDetailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs text-muted-foreground">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+const inp = "w-full rounded-md border bg-background px-3 py-2 text-sm";
+
+function PayloadForm({
+  type,
+  payload,
+  onChange,
+}: {
+  type: string;
+  payload: Record<string, unknown>;
+  onChange: (next: Record<string, unknown>) => void;
+}) {
+  if (type === "PRODUCT_ACCESS") {
+    return (
+      <div className="space-y-3">
+        <Field label="产品 ID">
+          <input
+            type="number"
+            value={String(payload.productId ?? "")}
+            onChange={(e) =>
+              onChange({ ...payload, productId: e.target.value === "" ? "" : Number(e.target.value) })
+            }
+            className={inp}
+          />
+        </Field>
+        <Field label="申请理由">
+          <textarea
+            value={String(payload.reason ?? "")}
+            onChange={(e) => onChange({ ...payload, reason: e.target.value })}
+            className={"h-20 " + inp}
+          />
+        </Field>
+      </div>
+    );
+  }
+  if (type === "CROSS_COMPANY_AUTH") {
+    return (
+      <div className="space-y-3">
+        <Field label="受让人 userId">
+          <input
+            type="number"
+            value={String(payload.userId ?? "")}
+            onChange={(e) =>
+              onChange({ ...payload, userId: e.target.value === "" ? "" : Number(e.target.value) })
+            }
+            className={inp}
+          />
+        </Field>
+        <Field label="scope 类型">
+          <select
+            value={String(payload.scopeType ?? "COMPANY")}
+            onChange={(e) => onChange({ ...payload, scopeType: e.target.value })}
+            className={inp}
+          >
+            <option value="COMPANY">COMPANY</option>
+            <option value="STORE">STORE</option>
+            <option value="ORG">ORG</option>
+            <option value="PRODUCT">PRODUCT</option>
+          </select>
+        </Field>
+        <Field label="scope ID">
+          <input
+            type="number"
+            value={String(payload.scopeId ?? "")}
+            onChange={(e) =>
+              onChange({ ...payload, scopeId: e.target.value === "" ? "" : Number(e.target.value) })
+            }
+            className={inp}
+          />
+        </Field>
+        <Field label="过期时间">
+          <input
+            type="datetime-local"
+            value={String(payload.expiresAt ?? "")}
+            onChange={(e) => onChange({ ...payload, expiresAt: e.target.value })}
+            className={inp}
+          />
+        </Field>
+        <Field label="申请理由">
+          <textarea
+            value={String(payload.reason ?? "")}
+            onChange={(e) => onChange({ ...payload, reason: e.target.value })}
+            className={"h-20 " + inp}
+          />
+        </Field>
+      </div>
+    );
+  }
+  return (
+    <textarea
+      value={JSON.stringify(payload, null, 2)}
+      onChange={(e) => {
+        try {
+          onChange(JSON.parse(e.target.value));
+        } catch {
+          /* 输入中 */
+        }
+      }}
+      className="h-44 w-full rounded-md border bg-background p-2 font-mono text-xs"
+    />
   );
 }
