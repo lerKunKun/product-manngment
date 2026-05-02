@@ -12,7 +12,6 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   sagaApi,
@@ -28,6 +27,7 @@ import {
   LoadingBlock,
   Spinner,
 } from "@/components/ui/StatusBlocks";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -164,12 +164,7 @@ export default function SagaProgressPage() {
   if (!state) {
     return (
       <div className="space-y-3">
-        <Link
-          href="/newstore"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </Link>
+        <Breadcrumb items={[{ href: "/newstore", label: "一键开店" }, { label: `Saga ${taskId}` }]} />
         <div className="rounded-md border bg-background p-6 text-sm text-muted-foreground">
           未找到 saga taskId={taskId}
         </div>
@@ -187,13 +182,8 @@ export default function SagaProgressPage() {
 
   return (
     <div className="space-y-5">
+      <Breadcrumb items={[{ href: "/newstore", label: "一键开店" }, { label: `Saga ${taskId}` }]} />
       <div className="flex flex-wrap items-center gap-3">
-        <Link
-          href="/newstore"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </Link>
         <h1 className="text-2xl font-semibold">Saga #{state.taskId}</h1>
         <span
           className={"inline-block rounded border px-2 py-0.5 text-xs " + cls}
@@ -223,32 +213,16 @@ export default function SagaProgressPage() {
         </button>
       </div>
 
-      {/* Stepper */}
-      <ol className="flex flex-wrap items-center gap-1 text-xs">
-        {SAGA_STEPS.map((s, i) => {
-          const active = i === currentStepIdx;
-          const done = currentStepIdx > i || state.status === "SUCCESS";
-          return (
-            <li key={s} className="flex items-center gap-1">
-              <span
-                className={
-                  "rounded-full border px-3 py-1 transition-colors " +
-                  (active
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : done
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                      : "border-zinc-300 text-zinc-500")
-                }
-              >
-                {i + 1}. {SAGA_STEP_LABEL[s] ?? s}
-              </span>
-              {i < SAGA_STEPS.length - 1 && (
-                <span className="text-zinc-300">→</span>
-              )}
-            </li>
-          );
-        })}
-      </ol>
+      {/* Stepper（T9：horizontal 9 圆点指示器） */}
+      <SagaStepper
+        steps={SAGA_STEPS as readonly string[]}
+        labels={SAGA_STEP_LABEL}
+        currentStepIdx={currentStepIdx}
+        status={state.status}
+      />
+      {currentStepIdx < 0 && (
+        <p className="text-xs text-muted-foreground">Saga 状态读取中…</p>
+      )}
 
       {isFailed && state.errorMessage && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
@@ -473,5 +447,103 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd>{value}</dd>
     </div>
+  );
+}
+
+/**
+ * T9: Saga 12 步骤指示器（horizontal stepper）
+ *
+ * 9 圆点：起点 INIT + 7 中间步 + 终点 SUCCESS。
+ * - 已完成 (idx < current 或 status=SUCCESS)：emerald-500 实心 + ✓
+ * - 当前 (idx === current && !SUCCESS && !FAILED)：blue-500 实心 + 边框
+ * - 未到：zinc-300
+ * - FAILED：当前点 rose-500，后续灰
+ * 步骤间连线对应着色。
+ */
+function SagaStepper({
+  steps,
+  labels,
+  currentStepIdx,
+  status,
+}: {
+  steps: readonly string[];
+  labels: Record<string, string>;
+  currentStepIdx: number;
+  status: string;
+}) {
+  const isFailed = status === "FAILED";
+  const isSuccess = status === "SUCCESS";
+  const cur = currentStepIdx < 0 ? -1 : currentStepIdx;
+
+  return (
+    <ol className="flex w-full items-start gap-0 overflow-x-auto py-2">
+      {steps.map((s, i) => {
+        const isLast = i === steps.length - 1;
+        // dot 状态
+        let dotKind: "done" | "current" | "failed" | "todo";
+        if (isSuccess) {
+          dotKind = "done";
+        } else if (isFailed) {
+          if (i < cur) dotKind = "done";
+          else if (i === cur) dotKind = "failed";
+          else dotKind = "todo";
+        } else if (cur < 0) {
+          dotKind = "todo";
+        } else if (i < cur) {
+          dotKind = "done";
+        } else if (i === cur) {
+          dotKind = "current";
+        } else {
+          dotKind = "todo";
+        }
+        // 连线状态：本节点到下一节点之间的线，已完成（i < cur 或 SUCCESS）显示 emerald
+        const lineDone =
+          isSuccess || (!isFailed && i < cur) || (isFailed && i < cur);
+        return (
+          <li key={s} className="flex flex-1 items-start min-w-0">
+            <div className="flex flex-col items-center min-w-0 px-1">
+              <span
+                aria-current={dotKind === "current" ? "step" : undefined}
+                className={
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-xs font-semibold transition-colors " +
+                  (dotKind === "done"
+                    ? "border-emerald-500 bg-emerald-500 text-white"
+                    : dotKind === "current"
+                      ? "border-blue-500 bg-blue-500 text-white animate-pulse"
+                      : dotKind === "failed"
+                        ? "border-rose-500 bg-rose-500 text-white"
+                        : "border-zinc-300 bg-white text-zinc-400")
+                }
+              >
+                {dotKind === "done" ? "✓" : dotKind === "failed" ? "!" : i + 1}
+              </span>
+              <span
+                className={
+                  "mt-1 text-center text-[11px] leading-tight " +
+                  (dotKind === "done"
+                    ? "text-emerald-700"
+                    : dotKind === "current"
+                      ? "text-blue-700 font-medium"
+                      : dotKind === "failed"
+                        ? "text-rose-700 font-medium"
+                        : "text-zinc-400")
+                }
+              >
+                {labels[s] ?? s}
+              </span>
+            </div>
+            {!isLast && (
+              <span
+                aria-hidden="true"
+                className={
+                  "mt-3.5 h-0.5 flex-1 min-w-[12px] " +
+                  (lineDone ? "bg-emerald-500" : "bg-zinc-200")
+                }
+              />
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }

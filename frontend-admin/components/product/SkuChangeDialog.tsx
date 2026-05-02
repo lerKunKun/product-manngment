@@ -6,7 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Spinner } from "@/components/ui/StatusBlocks";
 import { purchaseApi } from "@/lib/api/purchase";
 
-const SENSITIVE_ACTION = "CHANGE_SKU";
+const SENSITIVE_ACTION = "PURCHASE_SKU_EDIT";
 
 /**
  * 修改变体 SKU 的二次确认对话框：先请求钉钉验证码 → 验证拿 token → 调 changeSku。

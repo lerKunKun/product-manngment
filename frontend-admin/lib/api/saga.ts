@@ -37,14 +37,14 @@ export const SAGA_STEPS = [
 export type SagaStep = (typeof SAGA_STEPS)[number];
 
 export const SAGA_STEP_LABEL: Record<string, string> = {
-  INIT: "初始化",
-  AUTH_DONE: "授权完成",
-  MEDIA: "媒体上传",
-  COLLECTIONS: "集合创建",
-  PRODUCTS: "产品推送",
-  GUIDE: "指引文档",
-  THEME: "主题应用",
-  PUBLISH: "店铺发布",
+  INIT: "开始",
+  AUTH_DONE: "已授权",
+  MEDIA: "上传媒体",
+  COLLECTIONS: "创建集合",
+  PRODUCTS: "推送产品",
+  GUIDE: "推送指南",
+  THEME: "部署主题",
+  PUBLISH: "发布主题",
   SUCCESS: "完成",
 };
 

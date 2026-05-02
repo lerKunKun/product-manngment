@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { productApi, type ProductDetail, type ExternalLink, type ProductDoc, type ProductVariant } from "@/lib/api/product";
 import type { ApiError } from "@/lib/api/client";
 import { RichTextEditor } from "@/components/editor/RichTextEditor";
@@ -10,6 +10,7 @@ import { PushTriggerDialog } from "@/components/push/PushTriggerDialog";
 import { StoreMappingPanel } from "@/components/product/StoreMappingPanel";
 import { PurchaseTab } from "@/components/product/PurchaseTab";
 import { PreviewButton } from "@/components/preview/PreviewButton";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 
 type Tab = "basic" | "variants" | "images" | "links" | "purchase" | "docs" | "mapping" | "seo";
 
@@ -20,7 +21,6 @@ const inpSm = "rounded border bg-background px-2 py-1 text-sm focus:outline-none
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
-  const router = useRouter();
 
   const [d, setD] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,8 +86,8 @@ export default function ProductDetailPage() {
 
   return (
     <div className="space-y-4">
+      <Breadcrumb items={[{ href: "/products", label: "产品库" }, { label: `#${id}` }]} />
       <div className="flex items-center gap-3">
-        <button onClick={() => router.push("/products")} className="text-sm text-muted-foreground hover:text-foreground">← 返回列表</button>
         <h1 className="text-2xl font-semibold">{d.product.title}</h1>
         <span className="rounded border bg-muted px-2 py-0.5 font-mono text-xs">{d.product.handle}</span>
         <span className="flex-1" />

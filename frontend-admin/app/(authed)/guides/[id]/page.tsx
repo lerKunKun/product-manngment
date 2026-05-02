@@ -12,6 +12,7 @@ import {
 } from "@/components/guide/GuideForm";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, ErrorBanner, EmptyState } from "@/components/ui/StatusBlocks";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 
 export default function GuideEditPage() {
   const params = useParams<{ id: string }>();
@@ -103,12 +104,7 @@ export default function GuideEditPage() {
   if (!g) {
     return (
       <div className="space-y-4">
-        <button
-          onClick={() => router.push("/guides")}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </button>
+        <Breadcrumb items={[{ href: "/guides", label: "指导文档" }, { label: `#${id}` }]} />
         <EmptyState title="文档不存在" hint={`id=${id} 未找到`} />
       </div>
     );
@@ -119,14 +115,8 @@ export default function GuideEditPage() {
 
   return (
     <form onSubmit={save} className="space-y-4">
+      <Breadcrumb items={[{ href: "/guides", label: "指导文档" }, { label: `#${id}` }]} />
       <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => router.push("/guides")}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </button>
         <h1 className="text-2xl font-semibold">{g.title}</h1>
         <span className="rounded border bg-muted px-2 py-0.5 font-mono text-xs">
           {g.code}

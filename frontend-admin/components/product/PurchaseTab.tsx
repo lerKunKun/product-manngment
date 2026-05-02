@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, ErrorBanner } from "@/components/ui/StatusBlocks";
+import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { purchaseApi, type PurchaseInfo, type SkuChangeLog } from "@/lib/api/purchase";
 import { SkuChangeDialog } from "./SkuChangeDialog";
 import type { ApiError } from "@/lib/api/client";
@@ -12,19 +13,28 @@ const inpSm =
 
 type Draft = {
   cost: string;
-  weightG: string;
-  logisticsTag: string;
+  grossWeight: string;
+  logisticsTags: string;
   purchaseUrl: string;
+  note: string;
 };
 
 function toDraft(r: PurchaseInfo): Draft {
   return {
     cost: r.cost == null ? "" : String(r.cost),
-    weightG: r.weightG == null ? "" : String(r.weightG),
-    logisticsTag: r.logisticsTag ?? "",
+    grossWeight: r.grossWeight == null ? "" : String(r.grossWeight),
+    logisticsTags: r.logisticsTags ?? "",
     purchaseUrl: r.purchaseUrl ?? "",
+    note: r.note ?? "",
   };
 }
+
+const SYNC_BADGE: Record<string, { v: BadgeVariant; label: string }> = {
+  PENDING: { v: "warning", label: "PENDING" },
+  SUCCESS: { v: "success", label: "SUCCESS" },
+  PARTIAL: { v: "warning", label: "PARTIAL" },
+  FAILED: { v: "error", label: "FAILED" },
+};
 
 export function PurchaseTab({ productId }: { productId: number }) {
   const toast = useToast();
@@ -65,17 +75,19 @@ export function PurchaseTab({ productId }: { productId: number }) {
     const original = toDraft(row);
     if (
       d.cost === original.cost &&
-      d.weightG === original.weightG &&
-      d.logisticsTag === original.logisticsTag &&
-      d.purchaseUrl === original.purchaseUrl
+      d.grossWeight === original.grossWeight &&
+      d.logisticsTags === original.logisticsTags &&
+      d.purchaseUrl === original.purchaseUrl &&
+      d.note === original.note
     ) {
       return;
     }
     const body: Partial<PurchaseInfo> = {
       cost: d.cost === "" ? undefined : Number(d.cost),
-      weightG: d.weightG === "" ? undefined : Number(d.weightG),
-      logisticsTag: d.logisticsTag || undefined,
+      grossWeight: d.grossWeight === "" ? undefined : Number(d.grossWeight),
+      logisticsTags: d.logisticsTags || undefined,
       purchaseUrl: d.purchaseUrl || undefined,
+      note: d.note || undefined,
     };
     try {
       await purchaseApi.updateVariant(row.variantId, body);
@@ -100,13 +112,14 @@ export function PurchaseTab({ productId }: { productId: number }) {
               <th className="px-2 py-2 text-right">克重 (g)</th>
               <th className="px-2 py-2 text-left">物流标签</th>
               <th className="px-2 py-2 text-left">采购链接</th>
+              <th className="px-2 py-2 text-left">备注</th>
               <th className="px-2 py-2 text-right">操作</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
                   暂无采购数据
                 </td>
               </tr>
@@ -141,18 +154,18 @@ export function PurchaseTab({ productId }: { productId: number }) {
                     <input
                       type="number"
                       step="0.01"
-                      value={d.weightG}
-                      onChange={(e) => setField(r.variantId, "weightG", e.target.value)}
+                      value={d.grossWeight}
+                      onChange={(e) => setField(r.variantId, "grossWeight", e.target.value)}
                       onBlur={() => commit(r)}
                       className={inpSm + " w-24 text-right"}
                     />
                   </td>
                   <td className="px-2 py-2">
                     <input
-                      value={d.logisticsTag}
-                      onChange={(e) => setField(r.variantId, "logisticsTag", e.target.value)}
+                      value={d.logisticsTags}
+                      onChange={(e) => setField(r.variantId, "logisticsTags", e.target.value)}
                       onBlur={() => commit(r)}
-                      placeholder='如 液体/带电'
+                      placeholder="逗号分隔，如：液体,带电"
                       className={inpSm}
                     />
                   </td>
@@ -162,6 +175,15 @@ export function PurchaseTab({ productId }: { productId: number }) {
                       onChange={(e) => setField(r.variantId, "purchaseUrl", e.target.value)}
                       onBlur={() => commit(r)}
                       placeholder="https://1688..."
+                      className={inpSm + " w-full"}
+                    />
+                  </td>
+                  <td className="px-2 py-2">
+                    <input
+                      value={d.note}
+                      onChange={(e) => setField(r.variantId, "note", e.target.value)}
+                      onBlur={() => commit(r)}
+                      placeholder="备注（可选）"
                       className={inpSm + " w-full"}
                     />
                   </td>
@@ -225,7 +247,7 @@ function SkuLogList({ rows }: { rows: PurchaseInfo[] }) {
         if (aborted) return;
         const merged = all
           .flat()
-          .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+          .sort((a, b) => (b.confirmedAt ?? "").localeCompare(a.confirmedAt ?? ""));
         setLogs(merged);
       } catch (e) {
         if (!aborted) setError((e as ApiError).message);
@@ -245,27 +267,28 @@ function SkuLogList({ rows }: { rows: PurchaseInfo[] }) {
 
   return (
     <ol className="space-y-2 text-sm">
-      {logs.map((l) => (
-        <li
-          key={l.id}
-          className="rounded-md border-l-2 border-primary/40 bg-muted/20 px-3 py-2"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-mono text-xs">
-              {(l.oldSku || "—")} → <span className="font-medium">{l.newSku}</span>
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {(l.createdAt ?? "").replace("T", " ").slice(0, 19)}
-            </span>
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            操作人 userId={l.actorId}
-            {typeof l.syncedStoreCount === "number" && (
-              <> · 已同步 {l.syncedStoreCount} 家店铺</>
-            )}
-          </div>
-        </li>
-      ))}
+      {logs.map((l) => {
+        const status = l.syncStatus ? SYNC_BADGE[l.syncStatus] ?? { v: "neutral" as BadgeVariant, label: l.syncStatus } : null;
+        return (
+          <li
+            key={l.id}
+            className="rounded-md border-l-2 border-primary/40 bg-muted/20 px-3 py-2"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-mono text-xs">
+                {(l.oldSku || "—")} → <span className="font-medium">{l.newSku}</span>
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {(l.confirmedAt ?? "").replace("T", " ").slice(0, 19)}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>操作人 userId={l.changedBy ?? "—"}</span>
+              {status && <Badge variant={status.v}>{status.label}</Badge>}
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }

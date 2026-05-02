@@ -71,4 +71,34 @@ export const storeApi = {
       "/auth/sensitive/verify",
       { action, code }
     ),
+
+  /**
+   * T9: 健康检查兜底——后端没有 /store/{id}/test，
+   * 用 list() 找到该 id 是否仍可读作为健康度信号（验证 token 不属于过期 / uninstalled 状态）。
+   */
+  healthCheck: async (id: number): Promise<{ ok: boolean; status?: string; message?: string }> => {
+    try {
+      const all = await storeApi.list();
+      const s = all.find((x) => x.id === id);
+      if (!s) return { ok: false, message: "店铺不存在" };
+      if (s.status !== "ACTIVE") {
+        return { ok: false, status: s.status, message: `状态：${s.status}` };
+      }
+      return { ok: true, status: s.status };
+    } catch (e) {
+      return { ok: false, message: (e as Error).message };
+    }
+  },
+
+  /** T9: 批量禁用占位——后端无 disable endpoint，调用会失败。 */
+  disable: (id: number, sensitiveToken: string) =>
+    api.post<void>(`/store/${id}/disable`, null, {
+      headers: { "X-Sensitive-Token": sensitiveToken },
+    }),
 };
+
+/** T9：后端 store.StoreController 暂未实现批量禁用 / 健康检查 endpoint。 */
+export const STORE_DISABLE_AVAILABLE = false;
+export const STORE_TEST_ENDPOINT_AVAILABLE = false;
+/** T9：后端无统一的「触发资产快照」endpoint（asset-snapshot 只有 GET），批量拉资产 disabled。 */
+export const ASSET_TRIGGER_AVAILABLE = false;

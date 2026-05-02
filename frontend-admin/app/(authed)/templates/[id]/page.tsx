@@ -11,6 +11,7 @@ import {
 import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, ErrorBanner, EmptyState } from "@/components/ui/StatusBlocks";
 import { Dialog } from "@/components/ui/Dialog";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 
 const inp =
   "w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -206,12 +207,7 @@ export default function TemplateDetailPage() {
   if (!d) {
     return (
       <div className="space-y-4">
-        <button
-          onClick={() => router.push("/templates")}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </button>
+        <Breadcrumb items={[{ href: "/templates", label: "模板库" }, { label: `#${id}` }]} />
         <EmptyState title="模板不存在" hint={`id=${id} 未找到`} />
       </div>
     );
@@ -228,13 +224,8 @@ export default function TemplateDetailPage() {
 
   return (
     <div className="space-y-4">
+      <Breadcrumb items={[{ href: "/templates", label: "模板库" }, { label: `#${id}` }]} />
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => router.push("/templates")}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </button>
         <h1 className="text-2xl font-semibold">{t.name}</h1>
         <span className="rounded border bg-muted px-2 py-0.5 font-mono text-xs">
           {t.code}

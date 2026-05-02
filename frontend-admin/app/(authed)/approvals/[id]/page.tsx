@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, ErrorBanner } from "@/components/ui/StatusBlocks";
 import {
@@ -12,6 +11,7 @@ import {
   type ApprovalDetail,
 } from "@/lib/api/approval";
 import { useAuthStore } from "@/lib/auth/store";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import type { ApiError } from "@/lib/api/client";
 
 const ACTION_LABEL: Record<string, string> = {
@@ -23,7 +23,6 @@ const ACTION_LABEL: Record<string, string> = {
 };
 
 export default function ApprovalDetailPage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = Number(params?.id);
   const toast = useToast();
@@ -113,15 +112,10 @@ export default function ApprovalDetailPage() {
 
   return (
     <div className="space-y-4">
+      <Breadcrumb items={[{ href: "/approvals", label: "审批中心" }, { label: `#${id}` }]} />
       <div className="flex items-center justify-between">
         <div>
-          <Link
-            href="/approvals"
-            className="text-sm text-muted-foreground hover:underline"
-          >
-            ← 返回审批列表
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold">
+          <h1 className="text-2xl font-semibold">
             审批 #{f.id} ·{" "}
             <span className="text-base text-muted-foreground">
               {TYPE_LABEL[f.type] ?? f.type}

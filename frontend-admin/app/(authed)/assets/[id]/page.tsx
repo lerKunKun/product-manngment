@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   assetSnapshotApi,
   humanBytes,
@@ -10,11 +10,11 @@ import {
 } from "@/lib/api/snapshot";
 import { LoadingBlock, ErrorBanner, EmptyState } from "@/components/ui/StatusBlocks";
 import { useToast } from "@/components/ui/Toast";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 
 export default function AssetSnapshotDetailPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
-  const router = useRouter();
   const toast = useToast();
 
   const [d, setD] = useState<AssetSnapshotDetail | null>(null);
@@ -59,14 +59,7 @@ export default function AssetSnapshotDetailPage() {
   if (!d || !d.id) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.push("/assets")}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            ← 返回列表
-          </button>
-        </div>
+        <Breadcrumb items={[{ href: "/assets", label: "资产快照" }, { label: `#${id}` }]} />
         <EmptyState title="快照不存在" hint={`id=${id} 未找到`} />
       </div>
     );
@@ -76,13 +69,8 @@ export default function AssetSnapshotDetailPage() {
 
   return (
     <div className="space-y-4">
+      <Breadcrumb items={[{ href: "/assets", label: "资产快照" }, { label: `#${id}` }]} />
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => router.push("/assets")}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </button>
         <h1 className="text-2xl font-semibold">资产快照 #{d.id}</h1>
         <span className={"inline-block rounded border px-2 py-0.5 text-xs " + cls}>
           {d.status}

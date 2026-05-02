@@ -2,21 +2,29 @@ import { api } from "./client";
 
 export type PurchaseInfo = {
   variantId: number;
-  sku: string;
-  cost?: number;
-  weightG?: number;
-  logisticsTag?: string;
+  position?: number;
+  sku?: string;
+  option1?: string;
+  option2?: string;
+  price?: number;
   purchaseUrl?: string;
+  cost?: number;
+  currency?: string;
+  grossWeight?: number;
+  weightUnit?: string;
+  logisticsTags?: string;
+  note?: string;
 };
 
 export type SkuChangeLog = {
   id: number;
   variantId: number;
+  productId?: number;
   oldSku: string;
   newSku: string;
-  actorId: number;
-  syncedStoreCount?: number;
-  createdAt: string;
+  changedBy?: number;
+  confirmedAt?: string;
+  syncStatus?: "PENDING" | "SUCCESS" | "PARTIAL" | "FAILED" | string;
 };
 
 export const purchaseApi = {

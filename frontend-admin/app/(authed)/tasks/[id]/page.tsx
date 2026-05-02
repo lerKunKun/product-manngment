@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   taskApi,
   type TaskDetail,
   type TaskPayloadResp,
-  TASK_STATUS_BADGE,
+  TASK_RETRY_AVAILABLE,
   isTaskActive,
   durationOf,
 } from "@/lib/api/task";
@@ -15,6 +15,18 @@ import {
   ErrorBanner,
   EmptyState,
 } from "@/components/ui/StatusBlocks";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { Badge, type BadgeVariant } from "@/components/ui/Badge";
+import { useToast } from "@/components/ui/Toast";
+
+const STATUS_VARIANT: Record<string, BadgeVariant> = {
+  PENDING: "warning",
+  RUNNING: "info",
+  SUCCESS: "success",
+  FAILED: "error",
+  PARTIAL: "warning",
+  CANCELED: "neutral",
+};
 
 type Tab = "detail" | "payload" | "result" | "conflicts";
 
@@ -23,12 +35,13 @@ const POLL_INTERVAL_MS = 3000;
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
-  const router = useRouter();
+  const toast = useToast();
 
   const [d, setD] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("detail");
+  const [retrying, setRetrying] = useState(false);
 
   // payload / result lazy-load
   const [payloadResp, setPayloadResp] = useState<TaskPayloadResp | null>(null);
@@ -103,22 +116,28 @@ export default function TaskDetailPage() {
   if (!d || !d.id) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.push("/tasks")}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            ← 返回列表
-          </button>
-        </div>
+        <Breadcrumb items={[{ href: "/tasks", label: "任务监控" }, { label: `#${id}` }]} />
         <EmptyState title="任务不存在" hint={`id=${id} 未找到`} />
       </div>
     );
   }
 
-  const cls =
-    TASK_STATUS_BADGE[d.status] ?? "bg-zinc-100 text-zinc-700 border-zinc-300";
   const conflictsCount = d.pushConflicts?.length ?? 0;
+
+  async function onRetry() {
+    if (!TASK_RETRY_AVAILABLE) return;
+    setRetrying(true);
+    try {
+      await taskApi.retry(id);
+      toast.success(`#${id} 已重试`);
+      load(true);
+    } catch (e) {
+      toast.error(`重试失败：${(e as Error).message}`);
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   const tabs: { k: Tab; label: string }[] = [
     { k: "detail", label: "详情" },
     { k: "payload", label: "Payload" },
@@ -128,21 +147,29 @@ export default function TaskDetailPage() {
 
   return (
     <div className="space-y-4">
+      <Breadcrumb items={[{ href: "/tasks", label: "任务监控" }, { label: `#${id}` }]} />
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => router.push("/tasks")}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </button>
         <h1 className="text-2xl font-semibold">任务 #{d.id}</h1>
-        <span className={"inline-block rounded border px-2 py-0.5 text-xs " + cls}>
-          {d.status}
-        </span>
+        <Badge variant={STATUS_VARIANT[d.status] ?? "neutral"}>{d.status}</Badge>
         <span className="rounded border bg-muted px-2 py-0.5 font-mono text-xs">
           {d.type}
         </span>
         <span className="flex-1" />
+        {d.status === "FAILED" && (
+          <button
+            type="button"
+            disabled={!TASK_RETRY_AVAILABLE || retrying}
+            onClick={onRetry}
+            title={
+              TASK_RETRY_AVAILABLE
+                ? "重试该任务"
+                : "后端尚未实现 POST /task/{id}/retry"
+            }
+            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {retrying ? "重试中…" : "重试"}
+          </button>
+        )}
         {active && (
           <span className="text-xs text-muted-foreground">
             轮询中 · {POLL_INTERVAL_MS / 1000}s

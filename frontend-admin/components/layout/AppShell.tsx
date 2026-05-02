@@ -56,6 +56,8 @@ const NAV_GROUPS: {
   {
     section: "系统",
     items: [
+      { href: "/orgs", label: "组织管理" },
+      { href: "/admin/role", label: "角色管理" },
       { href: "/admin/notification-log", label: "通知日志" },
       { href: "/admin/audit-log", label: "审计日志" },
     ],

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   productSnapshotApi,
   humanBytes,
@@ -9,13 +9,13 @@ import {
   type ProductSnapshotDetail,
 } from "@/lib/api/snapshot";
 import { LoadingBlock, ErrorBanner, EmptyState } from "@/components/ui/StatusBlocks";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 
 type Tab = "basic" | "price" | "inventory" | "manifest";
 
 export default function ProductSnapshotDetailPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
-  const router = useRouter();
 
   const [d, setD] = useState<ProductSnapshotDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,14 +68,7 @@ export default function ProductSnapshotDetailPage() {
   if (!d || !d.id) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.push("/snapshots")}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            ← 返回列表
-          </button>
-        </div>
+        <Breadcrumb items={[{ href: "/snapshots", label: "产品快照" }, { label: `#${id}` }]} />
         <EmptyState title="快照不存在" hint={`id=${id} 未找到`} />
       </div>
     );
@@ -91,13 +84,8 @@ export default function ProductSnapshotDetailPage() {
 
   return (
     <div className="space-y-4">
+      <Breadcrumb items={[{ href: "/snapshots", label: "产品快照" }, { label: `#${id}` }]} />
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => router.push("/snapshots")}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 返回列表
-        </button>
         <h1 className="text-2xl font-semibold">产品快照 #{d.id}</h1>
         <span className={"inline-block rounded border px-2 py-0.5 text-xs " + cls}>
           {d.status}
