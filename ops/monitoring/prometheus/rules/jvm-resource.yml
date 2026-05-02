@@ -1,0 +1,38 @@
+groups:
+  - name: jvm-resource
+    interval: 60s
+    rules:
+      - alert: JvmHeapHigh
+        expr: |
+          (jvm_memory_used_bytes{area="heap",job="shopifyhub-backend"}
+           / jvm_memory_max_bytes{area="heap",job="shopifyhub-backend"}) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "JVM heap 使用率 > 90% 持续 10 分钟"
+          description: "实例 {{ $labels.instance }} heap 占比 {{ $value | humanizePercentage }}。"
+
+      - alert: NodeDiskLow
+        expr: |
+          100 * (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"}
+                 / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"}) < 20
+        for: 15m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "节点磁盘剩余 < 20%"
+          description: "{{ $labels.instance }} 根分区剩余 {{ $value | humanize }}%."
+
+      - alert: NodeCpuHigh
+        expr: |
+          100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 15m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "节点 CPU > 90% 持续 15 分钟"
+          description: "{{ $labels.instance }} 持续 CPU 占用 {{ $value | humanize }}%."

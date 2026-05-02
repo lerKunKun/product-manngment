@@ -1,0 +1,36 @@
+groups:
+  - name: business
+    interval: 60s
+    rules:
+      - alert: StoreTokensExpiringSoon
+        expr: shopifyhub_store_tokens_expiring_soon{job="shopifyhub-backend"} > 0
+        for: 0m  # 立即触发，但有 24h 提醒去重
+        labels:
+          severity: info
+          team: ops
+        annotations:
+          summary: "{{ $value | humanize }} 个 Shopify token 7 天内将过期"
+          description: "在 store 表查 status=ACTIVE AND expires_at <= NOW()+7d 的行；提前续期/重接。"
+
+      # 占位告警 — 等待对应 metric 落地后自然激活
+      - alert: ProductPushFailureRate
+        expr: |
+          (sum(rate(shopifyhub_push_failures_total[5m]))
+           / sum(rate(shopifyhub_push_attempts_total[5m]))) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+          placeholder: w2-push
+        annotations:
+          summary: "[占位] 产品推送失败率 > 5%（W2-PUSH 落地后激活）"
+
+      - alert: MqQueueBacklog
+        expr: rabbitmq_queue_messages_ready > 1000
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+          placeholder: rabbitmq-exporter
+        annotations:
+          summary: "[占位] RabbitMQ 某队列堆积 > 1000（需 rabbitmq-exporter，W4-OPS 阶段）"

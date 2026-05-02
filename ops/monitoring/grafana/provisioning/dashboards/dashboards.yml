@@ -1,0 +1,14 @@
+apiVersion: 1
+
+# W2-MON-03 will drop dashboard JSON files into ./grafana/dashboards/
+providers:
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true

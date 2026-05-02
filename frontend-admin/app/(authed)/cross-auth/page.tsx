@@ -1,0 +1,244 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useToast } from "@/components/ui/Toast";
+import { LoadingBlock, EmptyState, ErrorBanner } from "@/components/ui/StatusBlocks";
+import {
+  crossAuthApi,
+  STATUS_BADGE,
+  type CrossAuthGrant,
+} from "@/lib/api/crossAuth";
+import { CrossAuthGrantDialog } from "@/components/crossAuth/CrossAuthGrantDialog";
+import type { ApiError } from "@/lib/api/client";
+
+const STATUS_FILTERS = [
+  { v: "", label: "全部" },
+  { v: "ACTIVE", label: "生效" },
+  { v: "REVOKED", label: "已撤销" },
+  { v: "EXPIRED", label: "已过期" },
+];
+
+const SENSITIVE_ACTION = "CROSS_AUTH_REVOKE";
+
+const ONE_DAY_MS = 24 * 3600 * 1000;
+
+export default function CrossAuthPage() {
+  const toast = useToast();
+  const [list, setList] = useState<CrossAuthGrant[]>([]);
+  const [status, setStatus] = useState<string>("ACTIVE");
+  const [userIdFilter, setUserIdFilter] = useState<string>("");
+  const [granterCompanyIdFilter, setGranterCompanyIdFilter] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await crossAuthApi.list({
+        status: status || undefined,
+        userId: userIdFilter ? Number(userIdFilter) : undefined,
+        granterCompanyId: granterCompanyIdFilter ? Number(granterCompanyIdFilter) : undefined,
+      });
+      setList(data ?? []);
+    } catch (e) {
+      setError((e as ApiError).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  async function revoke(id: number) {
+    if (!confirm(`撤销跨公司授权 #${id}？需要钉钉验证码二次确认。`)) return;
+    try {
+      await crossAuthApi.requestSensitiveCode(SENSITIVE_ACTION);
+      const code = window.prompt(
+        "钉钉收到的 6 位验证码（钉钉未配 dingtalk_userid 时看 backend 日志）："
+      );
+      if (!code) {
+        toast.info("已取消");
+        return;
+      }
+      const { sensitiveToken } = await crossAuthApi.verifySensitive(SENSITIVE_ACTION, code);
+      await crossAuthApi.revoke(id, sensitiveToken);
+      toast.success(`#${id} 已撤销`);
+      load();
+    } catch {
+      /* 全局 toast 已上报 */
+    }
+  }
+
+  function isExpiringSoon(g: CrossAuthGrant) {
+    if (g.status !== "ACTIVE") return false;
+    const ms = new Date(g.expiresAt).getTime() - Date.now();
+    return ms > 0 && ms < ONE_DAY_MS;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">跨公司授权</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            COMPANY_ADMIN 可向其他公司用户授予对本公司部分数据范围的访问；过期或撤销后立即失效。
+          </p>
+        </div>
+        <button
+          onClick={() => setDialogOpen(true)}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+        >
+          + 新建跨公司授权
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-background p-3">
+        <div className="flex gap-1 text-sm">
+          {STATUS_FILTERS.map((opt) => (
+            <button
+              key={opt.v}
+              onClick={() => setStatus(opt.v)}
+              className={
+                "rounded-md border px-3 py-1.5 transition-colors " +
+                (status === opt.v ? "border-primary bg-primary text-primary-foreground" : "")
+              }
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-end gap-2">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">受让人 userId</label>
+            <input
+              value={userIdFilter}
+              onChange={(e) => setUserIdFilter(e.target.value)}
+              inputMode="numeric"
+              placeholder="可选"
+              className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">授权方公司 ID</label>
+            <input
+              value={granterCompanyIdFilter}
+              onChange={(e) => setGranterCompanyIdFilter(e.target.value)}
+              inputMode="numeric"
+              placeholder="可选"
+              className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </div>
+          <button
+            onClick={load}
+            className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
+          >
+            查询
+          </button>
+        </div>
+      </div>
+
+      <ErrorBanner message={error} onRetry={load} />
+
+      <div className="overflow-hidden rounded-lg border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left">ID</th>
+              <th className="px-3 py-2 text-left">受让人 userId</th>
+              <th className="px-3 py-2 text-left">范围</th>
+              <th className="px-3 py-2 text-left">来源</th>
+              <th className="px-3 py-2 text-left">过期时间</th>
+              <th className="px-3 py-2 text-left">状态</th>
+              <th className="px-3 py-2 text-left">已通知</th>
+              <th className="px-3 py-2 text-left">创建时间</th>
+              <th className="px-3 py-2 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr>
+                <td colSpan={9}>
+                  <LoadingBlock />
+                </td>
+              </tr>
+            )}
+            {!loading && list.length === 0 && (
+              <tr>
+                <td colSpan={9} className="px-3 py-2">
+                  <EmptyState
+                    title="暂无跨公司授权记录"
+                    hint="点击右上角“+ 新建跨公司授权”创建第一条"
+                  />
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              list.map((g) => {
+                const badge = STATUS_BADGE[g.status] ?? STATUS_BADGE.REVOKED;
+                const expiringSoon = isExpiringSoon(g);
+                return (
+                  <tr key={g.id} className="border-t">
+                    <td className="px-3 py-2">{g.id}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{g.userId}</td>
+                    <td className="px-3 py-2 text-xs">
+                      <span className="font-mono">
+                        {g.scopeType}#{g.scopeId}
+                      </span>
+                      {g.crossCompany && (
+                        <span className="ml-1 inline-block rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-900">
+                          跨公司
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{g.source}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {new Date(g.expiresAt).toLocaleString("zh-CN")}
+                      {expiringSoon && (
+                        <span className="ml-1 inline-block rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-900">
+                          即将过期
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={"inline-block rounded border px-2 py-0.5 text-xs " + badge.cls}>
+                        {badge.text}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {g.expiringNotifiedAt
+                        ? new Date(g.expiringNotifiedAt).toLocaleString("zh-CN")
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {new Date(g.createdAt).toLocaleString("zh-CN")}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {g.status === "ACTIVE" && (
+                        <button
+                          onClick={() => revoke(g.id)}
+                          className="rounded border px-2 py-1 text-xs hover:bg-accent"
+                        >
+                          撤销
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
+
+      <CrossAuthGrantDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onCreated={load}
+      />
+    </div>
+  );
+}

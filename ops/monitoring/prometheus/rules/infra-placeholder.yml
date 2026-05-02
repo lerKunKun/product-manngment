@@ -1,0 +1,17 @@
+groups:
+  - name: infra-placeholder
+    interval: 60s
+    rules:
+      # 仍然占位：等 cloudwatch_exporter 接入后激活
+      - alert: RDSCPUHigh
+        expr: aws_rds_cpu_utilization_average > 80
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+          placeholder: cloudwatch-exporter
+        annotations:
+          summary: "[占位] AWS RDS CPU > 80%（需 cloudwatch_exporter）"
+
+      # 注：BackupFail / SslCertExpiring30d 已在 ops-alerts.yml W4-MON-01 完整化（见 DailyBackupOverdue / SslCertExpiring30d）。
+      # 这里保留占位文件仅保留 RDSCPUHigh，供未来 cloudwatch 接入扩展。

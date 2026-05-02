@@ -1,0 +1,153 @@
+spring:
+  datasource:
+    dynamic:
+      primary: platform
+      strict: false
+      datasource:
+        platform:
+          url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_PLATFORM_DB:platform}?useSSL=${MYSQL_TLS_REQUIRED:false}&serverTimezone=UTC&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+          username: ${MYSQL_USER:root}
+          password: ${MYSQL_PASSWORD:root}
+          driver-class-name: com.mysql.cj.jdbc.Driver
+        # tenant_01 ~ tenant_05 由 sys_tenant_datasource 表动态加载（Wave 1 实现）
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_PLATFORM_DB:platform}?useSSL=${MYSQL_TLS_REQUIRED:false}&serverTimezone=UTC&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+    user: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:#{null}}      # 空字符串会被 Redisson 当密码 AUTH，必须是 null
+      timeout: 5s
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+
+  rabbitmq:
+    host: ${MQ_HOST:localhost}
+    port: ${MQ_PORT:5672}
+    username: ${MQ_USER:guest}
+    password: ${MQ_PASS:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 10
+
+  mail:
+    host: ${SMTP_HOST:mail.biounetwork.com}
+    port: ${SMTP_PORT:465}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.ssl.enable: ${SMTP_TLS:true}
+      mail.smtp.auth: true
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: deletedAt
+      logic-not-delete-value: 'null'
+      logic-delete-value: 'NOW()'
+
+# R2 / MinIO（应用层读取，不进 Spring datasource）
+r2:
+  endpoint: ${R2_ENDPOINT:http://localhost:9000}
+  access-key: ${R2_ACCESS_KEY_ID:minioadmin}
+  secret-key: ${R2_SECRET_ACCESS_KEY:minioadmin}
+  bucket: ${R2_BUCKET:shopify-assets-dev}
+  public-base: ${R2_PUBLIC_BASE:http://localhost:9000/shopify-assets-dev}
+  region: auto
+
+# JWT（dev 阶段允许双 null：JWT 接口报错但应用可启动）
+jwt:
+  private-key: ${JWT_PRIVATE_KEY:}
+  public-key: ${JWT_PUBLIC_KEY:}
+  access-ttl: 30m
+  refresh-ttl: 7d
+  issuer: shopify-hub
+
+# 临时员工邀请配置（cron 用 Spring 6 字段：秒 分 时 日 月 周）
+invitation:
+  link-base: ${INVITATION_LINK_BASE:http://localhost:3000/invitation/accept}
+  link-ttl-hours: ${INVITATION_LINK_TTL_HOURS:48}
+  max-account-days: ${TEMP_USER_MAX_DAYS:90}
+  token-secret: ${INVITATION_TOKEN_SECRET:dev-invitation-secret-please-change-in-prod}
+  expiry-check-cron: "0 0 * * * *"   # 每小时整点
+  reminder-cron: "0 0 9 * * *"       # 每天 09:00
+
+# 钉钉企业内部应用（未配置时 /auth/dingtalk/* 返回 503）
+dingtalk:
+  main-corp-id: ${DINGTALK_MAIN_CORP_ID:}
+  main-agent-id: ${DINGTALK_MAIN_AGENT_ID:}
+  main-app-key: ${DINGTALK_MAIN_APP_KEY:}
+  main-app-secret: ${DINGTALK_MAIN_APP_SECRET:}
+  event-token: ${DINGTALK_EVENT_TOKEN:}
+  event-aes-key: ${DINGTALK_EVENT_AES_KEY:}
+
+# Shopify webhook（W2-SNAP-02）+ snapshot debounce（W2-SNAP-03）
+# - webhook.secret 留空时会跳过 HMAC 校验 + 日志 WARN（仅 dev）；生产必须填 Partner App API secret key
+# - snapshot.debounce-seconds：同一 (store, product) 在该窗口内多次 webhook 只触发一次下游快照（默认 5min）
+shopify:
+  webhook:
+    secret: ${SHOPIFY_WEBHOOK_SECRET:}
+  snapshot:
+    debounce-seconds: ${SHOPIFY_SNAPSHOT_DEBOUNCE_SECONDS:300}
+  worker:
+    base-url: ${SHOPIFY_WORKER_BASE_URL:http://localhost:8765}
+    call-timeout-seconds: ${SHOPIFY_WORKER_TIMEOUT_SECONDS:120}
+  # W2-SYNC-02: 04:00 全店全产品兜底扫 cron（dev 同生产；秒 分 时 日 月 周）
+  sync:
+    full-cron: ${SHOPIFY_SYNC_FULL_CRON:0 0 4 * * *}
+  # W3-NEW-06 + W3-NEW-07 主题 zip 安装：默认装完 unpublished 让用户审核后再 publish。
+  theme:
+    publish-after-install: ${SHOPIFY_THEME_PUBLISH_AFTER_INSTALL:false}
+  # W3-NEW-02 saga OAuth + dev mock
+  # - oauth.callback-base：拼 redirect_uri 用；生产改成 https://api.<域>/api
+  # - oauth.saga-frontend-base：回调成功后 302 跳的前端 wizard 路径
+  # - dev-mock-oauth：true 时 POST /saga/{id}/dev-mock-auth 可绕过真 Shopify OAuth；生产必须 false
+  oauth:
+    callback-base: ${SHOPIFY_OAUTH_CALLBACK_BASE:http://localhost:8080/api}
+    saga-frontend-base: ${SHOPIFY_SAGA_FRONTEND_BASE:http://localhost:3000/newstore}
+  dev-mock-oauth: ${SHOPIFY_DEV_MOCK_OAUTH:true}
+
+# W3-DS-01 跨公司授权时效（cron 用 Spring 6 字段：秒 分 时 日 月 周）
+# - expiry-warn-cron：扫 24h 内即将过期的跨公司授权 → 提醒（W3-DS-03 真实实现）
+# - expire-cron：把已过期的跨公司授权切 REVOKED（W3-DS-03 真实实现）
+# 当前调度器是骨架，仅打 debug；改 cron 不会触发真实业务。
+rbac:
+  cross-auth:
+    expiry-warn-cron: ${RBAC_CROSS_AUTH_EXPIRY_WARN_CRON:0 0 * * * *}
+    expire-cron: ${RBAC_CROSS_AUTH_EXPIRE_CRON:0 5 0 * * *}
+
+# W3-PV-03 + W3-PV-06 预览主题（合作者 dev store 池）
+# - max-per-dev-store：单 dev store 最大活跃 preview_theme 数（PENDING/BUILDING/READY）
+# - ttl-hours：单条 preview_theme 的硬过期时长（创建后 N 小时）
+# - cleanup-cron：兜底清理调度（Spring 6 字段：秒 分 时 日 月 周）；默认每 30 分钟整点
+preview:
+  max-per-dev-store: ${PREVIEW_MAX_PER_DEV_STORE:3}
+  ttl-hours: ${PREVIEW_TTL_HOURS:24}
+  cleanup-cron: ${PREVIEW_CLEANUP_CRON:0 */30 * * * *}
+
+# W3-PERF-01 Redis 热读缓存（StoreService.list / ProductService.detail / 用户权限占位）
+# - enabled=false 时所有 getOrLoad 直接走 loader（用于本地排查 / fallback 验证）
+# - default-ttl-seconds：所有缓存条目的统一 TTL，dev 5 分钟够看 hit 又不至于陈旧
+# - Redis 不可用时自动降级到 DB（仅 log warn），不会让 API 500
+cache:
+  enabled: ${CACHE_ENABLED:true}
+  default-ttl-seconds: ${CACHE_DEFAULT_TTL_SECONDS:300}

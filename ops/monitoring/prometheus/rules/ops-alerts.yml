@@ -1,0 +1,130 @@
+groups:
+  - name: ops-alerts
+    interval: 60s
+    rules:
+      # W4-MON-01：磁盘 < 20%（warning）/ < 10%（critical）
+      - alert: NodeDiskCritical
+        expr: |
+          100 * (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"}
+                 / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"}) < 10
+        for: 5m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "节点磁盘剩余 < 10%"
+          description: "{{ $labels.instance }} 根分区剩余 {{ $value | humanize }}%；可能在数小时内打挂服务。立即清理或扩容。"
+
+      # W4-MON-01：R2 上传失败率 > 5%（warning） / > 20%（critical）
+      # 依赖 backend 暴露 shopifyhub_r2_upload_total{result="success|fail"} counter
+      # 见 file/FileService 与 snapshot/SnapshotGenerationService —— 待 metric 上线后激活
+      - alert: R2UploadFailureRate
+        expr: |
+          (sum(rate(shopifyhub_r2_upload_total{result="fail"}[10m]))
+           / sum(rate(shopifyhub_r2_upload_total[10m]))) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+          placeholder: r2-metric
+        annotations:
+          summary: "R2 上传失败率 > 5%（10 分钟均值）"
+          description: "失败率 {{ $value | humanizePercentage }}。检查 R2 凭证 / 网络出口 / 桶配额。"
+
+      - alert: R2UploadFailureCritical
+        expr: |
+          (sum(rate(shopifyhub_r2_upload_total{result="fail"}[10m]))
+           / sum(rate(shopifyhub_r2_upload_total[10m]))) > 0.20
+        for: 5m
+        labels:
+          severity: critical
+          team: ops
+          placeholder: r2-metric
+        annotations:
+          summary: "R2 上传失败率 > 20%（严重）"
+          description: "失败率 {{ $value | humanizePercentage }}；推送 / 快照 / 备份链路即将连锁失败。"
+
+      # W4-MON-01：SSL 证书到期监控（依赖 blackbox-exporter，部署在节点 C）
+      - alert: SslCertExpiring30d
+        expr: probe_ssl_earliest_cert_expiry - time() < 30 * 86400
+        for: 0m
+        labels:
+          severity: warning
+          team: ops
+          placeholder: blackbox-exporter
+        annotations:
+          summary: "SSL 证书 < 30 天到期 ({{ $labels.instance }})"
+          description: "实例 {{ $labels.instance }} 的证书剩余 {{ $value | humanizeDuration }}。Cloudflare 默认自动续；自定义证书需手动 renew。"
+
+      - alert: SslCertExpiring7d
+        expr: probe_ssl_earliest_cert_expiry - time() < 7 * 86400
+        for: 0m
+        labels:
+          severity: critical
+          team: ops
+          placeholder: blackbox-exporter
+        annotations:
+          summary: "SSL 证书 < 7 天到期（critical，{{ $labels.instance }}）"
+          description: "实例 {{ $labels.instance }} 的证书 {{ $value | humanizeDuration }} 后过期，立即检查续期状态。"
+
+      # W4-OPS-04：每日备份未成功 > 36h → BACKUP_FAIL critical（钉钉独立群路由）
+      # 依赖 backend 暴露 shopifyhub_backup_last_success_seconds gauge（unix ts）
+      - alert: DailyBackupOverdue
+        expr: time() - shopifyhub_backup_last_success_seconds > 86400 * 1.5
+        for: 0m
+        labels:
+          severity: critical
+          team: ops
+          alert_class: backup
+        annotations:
+          summary: "数据库每日备份 36 小时内未成功"
+          description: "上次成功 {{ $value | humanizeDuration }} 前。检查 ops/backup/rds-backup.sh 节点 A cron 与 R2 上传链路。"
+
+      # W4-OPS-01：审计月归档延期 > 35 天
+      - alert: AuditArchiveOverdue
+        expr: time() - shopifyhub_audit_archive_last_success_seconds > 86400 * 35
+        for: 0m
+        labels:
+          severity: warning
+          team: ops
+          alert_class: archive
+        annotations:
+          summary: "审计日志月归档 > 35 天未成功"
+          description: "AuditArchiveScheduler 跑挂或 R2 写失败；检查 audit_archive_log 表 + backend 日志。"
+
+      # W4-NTF-04：通知发送失败率（dispatch 重试 3 次后 FAILED）
+      - alert: NotificationSendFailureRate
+        expr: |
+          (sum(rate(shopifyhub_notification_send_total{result="failed"}[15m]))
+           / sum(rate(shopifyhub_notification_send_total[15m]))) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+          placeholder: ntf-metric
+        annotations:
+          summary: "通知发送失败率 > 5%"
+          description: "钉钉 / 邮件渠道异常；检查 notification_log 表的 FAILED 行 + access_token 状态。"
+
+      # W4-APP：审批待办堆积 / 超期未决（默认阈值 7 天）
+      - alert: ApprovalPendingTooLong
+        expr: shopifyhub_approval_pending_max_age_seconds > 86400 * 7
+        for: 0m
+        labels:
+          severity: warning
+          team: ops
+          placeholder: approval-metric
+        annotations:
+          summary: "存在待审批 > 7 天的工单"
+          description: "approval_flow.status=PENDING 且 created_at 超过 7 天 — 检查审批人是否离职或权限缺失。"
+
+      # 跨公司授权未撤销 / 待重新审批（24h 提醒已落 W3-DS-03）
+      - alert: CrossAuthExpiringSoon
+        expr: shopifyhub_cross_auth_expiring_24h_count > 0
+        for: 0m
+        labels:
+          severity: info
+          team: ops
+        annotations:
+          summary: "{{ $value | humanize }} 条跨公司授权 24h 内到期"
+          description: "已通过 NotificationDispatcher CROSS_AUTH_EXPIRING 通知到受让人。"

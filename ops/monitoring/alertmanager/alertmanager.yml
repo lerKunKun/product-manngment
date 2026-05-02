@@ -1,0 +1,66 @@
+global:
+  resolve_timeout: 5m
+
+# W4-MON-02：路由分流
+#   - severity=critical 或 alert_class∈{backup,archive} → ops 钉钉群（独立机器人，不复用业务订阅）
+#   - severity=warning 且非 ops 类 → backend 钉钉群（团队按需订阅）
+#   - 其余 → default no-op（开发期降噪）
+route:
+  receiver: default
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+  group_by: ["alertname", "severity"]
+  routes:
+    # critical 全部进 ops 群
+    - matchers: [severity = "critical"]
+      receiver: dingtalk-ops
+      continue: true
+    # ops 类 warning（备份/归档/SSL/磁盘）也进 ops 群
+    - matchers: [alert_class = "backup"]
+      receiver: dingtalk-ops
+      continue: false
+    - matchers: [alert_class = "archive"]
+      receiver: dingtalk-ops
+      continue: false
+    - matchers: [team = "ops", severity = "warning"]
+      receiver: dingtalk-ops
+      continue: false
+    # 后端 warning 路由到后端群
+    - matchers: [team = "backend", severity = "warning"]
+      receiver: dingtalk-backend
+      continue: false
+
+receivers:
+  - name: default
+    # 开发期 no-op；生产可改邮件兜底
+
+  # W4-MON-02：ops 独立钉钉群（备份失败 / 归档失败 / 磁盘 / SSL）
+  # 使用钉钉群机器人 webhook + 关键词或加签校验：
+  #   钉钉群 → 群管理 → 智能群助手 → 添加机器人 → 自定义 → 安全设置：加签
+  # 把 access_token 与 secret 分两段：URL 用 access_token，secret 用 timestamp+sign 校验
+  # webhook 中转代理（推荐）：用 prometheus-msteams 或 dingtalk-webhook 中转，
+  #   开源实现：https://github.com/timonwong/prometheus-webhook-dingtalk
+  - name: dingtalk-ops
+    webhook_configs:
+      # 替换为：钉钉机器人中转地址（独立 ops 群）
+      # 示例：http://dingtalk-webhook:8060/dingtalk/ops/send
+      - url: ${ALERTMANAGER_DINGTALK_OPS_URL:-http://localhost:8060/dingtalk/ops/send}
+        send_resolved: true
+
+  # 后端通用 warning 群（开发 + 后端值班）
+  - name: dingtalk-backend
+    webhook_configs:
+      - url: ${ALERTMANAGER_DINGTALK_BACKEND_URL:-http://localhost:8060/dingtalk/backend/send}
+        send_resolved: true
+
+inhibit_rules:
+  # critical 触发时压制同名 warning，避免重复打扰
+  - source_matchers: [severity = "critical"]
+    target_matchers: [severity = "warning"]
+    equal: [alertname]
+
+  # SSL 7 天 critical 触发时压制 30 天 warning（同 instance）
+  - source_matchers: [alertname = "SslCertExpiring7d"]
+    target_matchers: [alertname = "SslCertExpiring30d"]
+    equal: [instance]

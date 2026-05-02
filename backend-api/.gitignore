@@ -1,0 +1,10 @@
+target/
+HELP.md
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+.mvn/
+.springBeans
+.factorypath
+out/
+.flattened-pom.xml
