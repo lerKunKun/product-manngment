@@ -127,6 +127,15 @@ public class StoreService {
         invalidateListCache(s.getTenantId());
     }
 
+    /** T10: 更新店铺状态（disable 等用），并失效列表缓存。 */
+    @Transactional
+    public void updateStatus(Store s) {
+        mapper.updateById(s);
+        invalidateListCache(s.getTenantId());
+        log.info("[store] updateStatus id={} domain={} status={}",
+                s.getId(), s.getMyshopifyDomain(), s.getStatus());
+    }
+
     /** W3-PV-01：标记 / 取消 dev store */
     @Transactional
     public void setDevStore(Long id, boolean devStore, Long operatorUserId) {

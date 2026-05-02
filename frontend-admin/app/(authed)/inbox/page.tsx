@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, EmptyState, ErrorBanner } from "@/components/ui/StatusBlocks";
 import { inboxApi, type InappMessage } from "@/lib/api/inbox";
@@ -8,9 +8,46 @@ import type { ApiError } from "@/lib/api/client";
 
 const PAGE_SIZE = 20;
 
+const CATEGORIES = ["全部", "邀请", "店铺", "推送", "审批", "运维", "系统"] as const;
+type Category = (typeof CATEGORIES)[number];
+
+function categoryOf(eventCode: string): string {
+  if (eventCode.startsWith("INVITATION_")) return "邀请";
+  if (eventCode.includes("NEW_STORE") || eventCode.includes("TOKEN_") || eventCode === "STAFF_FROZEN") return "店铺";
+  if (eventCode.includes("PUSH")) return "推送";
+  if (eventCode.startsWith("APPROVAL_") || eventCode.startsWith("CROSS_AUTH_")) return "审批";
+  if (eventCode === "BACKUP_FAIL" || eventCode === "HIGH_RISK_OP") return "运维";
+  return "系统";
+}
+
+const GROUP_KEYS = ["今天", "昨天", "本周", "更早"] as const;
+type GroupKey = (typeof GROUP_KEYS)[number];
+
+function groupByTime(items: InappMessage[]): Record<GroupKey, InappMessage[]> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - today.getDay());
+  const groups: Record<GroupKey, InappMessage[]> = { 今天: [], 昨天: [], 本周: [], 更早: [] };
+  for (const m of items) {
+    const t = new Date(m.createdAt);
+    if (t >= today) groups.今天.push(m);
+    else if (t >= yesterday) groups.昨天.push(m);
+    else if (t >= weekStart) groups.本周.push(m);
+    else groups.更早.push(m);
+  }
+  for (const k of GROUP_KEYS) {
+    groups[k].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  }
+  return groups;
+}
+
 export default function InboxPage() {
   const toast = useToast();
   const [tab, setTab] = useState<"all" | "unread">("all");
+  const [category, setCategory] = useState<Category>("全部");
   const [items, setItems] = useState<InappMessage[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -79,6 +116,12 @@ export default function InboxPage() {
     }
   }
 
+  const filtered = useMemo(
+    () => (category === "全部" ? items : items.filter((m) => categoryOf(m.eventCode) === category)),
+    [items, category]
+  );
+  const grouped = useMemo(() => groupByTime(filtered), [filtered]);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -104,98 +147,141 @@ export default function InboxPage() {
         </div>
       </div>
 
-      <div className="flex items-end justify-between rounded-lg border bg-background p-3">
-        <div className="flex gap-1 text-sm">
-          {(["all", "unread"] as const).map((k) => (
-            <button
-              key={k}
-              onClick={() => {
-                setTab(k);
-                setPage(1);
-              }}
-              className={
-                "rounded-md border px-3 py-1.5 transition-colors " +
-                (tab === k ? "border-primary bg-primary text-primary-foreground" : "")
-              }
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border bg-background p-3">
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1 text-sm">
+            {(["all", "unread"] as const).map((k) => (
+              <button
+                key={k}
+                onClick={() => {
+                  setTab(k);
+                  setPage(1);
+                }}
+                className={
+                  "rounded-md border px-3 py-1.5 transition-colors " +
+                  (tab === k ? "border-primary bg-primary text-primary-foreground" : "")
+                }
+              >
+                {k === "all" ? "全部" : "未读"}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 text-sm">
+            <label className="text-xs text-muted-foreground">分类</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as Category)}
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
             >
-              {k === "all" ? "全部" : "未读"}
-            </button>
-          ))}
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="text-xs text-muted-foreground">共 {total} 条</div>
       </div>
 
       <ErrorBanner message={error} onRetry={load} />
 
-      <div className="space-y-2">
+      <div className="space-y-4">
         {loading && <LoadingBlock />}
-        {!loading && items.length === 0 && (
-          <EmptyState title="暂无通知" hint={tab === "unread" ? "全部已读" : "等待系统事件"} />
+        {!loading && filtered.length === 0 && (
+          <EmptyState
+            title="暂无通知"
+            hint={
+              tab === "unread"
+                ? "全部已读"
+                : category !== "全部"
+                ? `当前分类「${category}」无消息`
+                : "等待系统事件"
+            }
+          />
         )}
         {!loading &&
-          items.map((m) => {
-            const isUnread = !m.readAt;
-            const isExpanded = expanded === m.id;
+          filtered.length > 0 &&
+          GROUP_KEYS.map((gk) => {
+            const list = grouped[gk];
+            if (list.length === 0) return null;
             return (
-              <div
-                key={m.id}
-                className={
-                  "rounded-md border transition-colors " +
-                  (isUnread ? "border-primary/40 bg-primary/5" : "bg-background")
-                }
-              >
-                <button
-                  onClick={() => handleExpand(m)}
-                  className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-accent/40"
-                >
-                  <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-                       style={{ background: isUnread ? "#dc2626" : "transparent",
-                                border: isUnread ? "none" : "1px solid #d4d4d8" }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={
-                          "truncate text-sm " +
-                          (isUnread ? "font-semibold text-foreground" : "text-muted-foreground")
-                        }
+              <section key={gk} className="space-y-2">
+                <div className="px-1 text-xs text-muted-foreground">
+                  {gk} ({list.length} 条)
+                </div>
+                {list.map((m) => {
+                  const isUnread = !m.readAt;
+                  const isExpanded = expanded === m.id;
+                  return (
+                    <div
+                      key={m.id}
+                      className={
+                        "rounded-md border transition-colors " +
+                        (isUnread ? "border-primary/40 bg-primary/5" : "bg-background opacity-90")
+                      }
+                    >
+                      <button
+                        onClick={() => handleExpand(m)}
+                        className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-accent/40"
                       >
-                        {m.subject}
-                      </span>
-                      <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
-                        {m.eventCode}
-                      </span>
+                        <div
+                          className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                          style={{
+                            background: isUnread ? "#dc2626" : "transparent",
+                            border: isUnread ? "none" : "1px solid #d4d4d8",
+                          }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={
+                                "truncate text-sm " +
+                                (isUnread
+                                  ? "font-semibold text-foreground"
+                                  : "text-muted-foreground")
+                              }
+                            >
+                              {m.subject}
+                            </span>
+                            <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
+                              {m.eventCode}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            {new Date(m.createdAt).toLocaleString("zh-CN")}
+                          </div>
+                        </div>
+                      </button>
+                      {isExpanded && (
+                        <div className="border-t bg-background px-4 py-3 text-sm">
+                          {m.bodyHtml ? (
+                            <div
+                              className="prose prose-sm max-w-none text-foreground"
+                              // 注意：bodyHtml 来源于后端 EmailTemplateRenderer 等可控渲染，未引入富文本编辑器
+                              dangerouslySetInnerHTML={{ __html: m.bodyHtml }}
+                            />
+                          ) : (
+                            <pre className="whitespace-pre-wrap break-words font-sans text-sm text-foreground">
+                              {m.bodyText ?? ""}
+                            </pre>
+                          )}
+                          {m.linkUrl && (
+                            <div className="mt-3">
+                              <button
+                                onClick={() => followLink(m.linkUrl)}
+                                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+                              >
+                                查看详情 →
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {new Date(m.createdAt).toLocaleString("zh-CN")}
-                    </div>
-                  </div>
-                </button>
-                {isExpanded && (
-                  <div className="border-t bg-background px-4 py-3 text-sm">
-                    {m.bodyHtml ? (
-                      <div
-                        className="prose prose-sm max-w-none text-foreground"
-                        // 注意：bodyHtml 来源于后端 EmailTemplateRenderer 等可控渲染，未引入富文本编辑器
-                        dangerouslySetInnerHTML={{ __html: m.bodyHtml }}
-                      />
-                    ) : (
-                      <pre className="whitespace-pre-wrap break-words font-sans text-sm text-foreground">
-                        {m.bodyText ?? ""}
-                      </pre>
-                    )}
-                    {m.linkUrl && (
-                      <div className="mt-3">
-                        <button
-                          onClick={() => followLink(m.linkUrl)}
-                          className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-                        >
-                          查看详情 →
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+                  );
+                })}
+              </section>
             );
           })}
       </div>

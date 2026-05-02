@@ -19,8 +19,10 @@ const STATUS_FILTERS = [
 ];
 
 const SENSITIVE_ACTION = "CROSS_AUTH_REVOKE";
+const SENSITIVE_ACTION_RENEW = "CROSS_AUTH_RENEW";
 
 const ONE_DAY_MS = 24 * 3600 * 1000;
+const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
 
 export default function CrossAuthPage() {
   const toast = useToast();
@@ -80,6 +82,47 @@ export default function CrossAuthPage() {
     return ms > 0 && ms < ONE_DAY_MS;
   }
 
+  async function renew(g: CrossAuthGrant) {
+    if (
+      !confirm(
+        `续期跨公司授权 #${g.id}？将创建一条新授权（有效期 7 天，旧记录保留至自然过期）。需要钉钉验证码二次确认。`
+      )
+    )
+      return;
+    try {
+      await crossAuthApi.requestSensitiveCode(SENSITIVE_ACTION_RENEW);
+      const code = window.prompt(
+        "钉钉收到的 6 位验证码（钉钉未配 dingtalk_userid 时看 backend 日志）："
+      );
+      if (!code) {
+        toast.info("已取消");
+        return;
+      }
+      const { sensitiveToken } = await crossAuthApi.verifySensitive(
+        SENSITIVE_ACTION_RENEW,
+        code
+      );
+      const expiresAt = new Date(Date.now() + SEVEN_DAYS_MS).toISOString();
+      await crossAuthApi.grant(
+        {
+          userId: g.userId,
+          scopeType: g.scopeType,
+          scopeId: g.scopeId,
+          expiresAt,
+          grantedBy: g.grantedBy,
+          granterCompanyId: g.granterCompanyId,
+        },
+        sensitiveToken
+      );
+      toast.success("已续期 7 天");
+      load();
+    } catch {
+      /* 全局 toast 已上报 */
+    }
+  }
+
+  const expiringSoon = list.filter(isExpiringSoon);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -89,13 +132,49 @@ export default function CrossAuthPage() {
             COMPANY_ADMIN 可向其他公司用户授予对本公司部分数据范围的访问；过期或撤销后立即失效。
           </p>
         </div>
-        <button
-          onClick={() => setDialogOpen(true)}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-        >
-          + 新建跨公司授权
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            disabled
+            title="v1.1 支持"
+            className="cursor-not-allowed rounded-md border px-4 py-2 text-sm font-medium opacity-50"
+          >
+            批量授权
+          </button>
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            + 新建跨公司授权
+          </button>
+        </div>
       </div>
+
+      {expiringSoon.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+          <div className="font-medium text-amber-900">
+            ⚠ {expiringSoon.length} 条授权 24 小时内到期
+          </div>
+          <ul className="mt-2 space-y-1 text-sm text-amber-900">
+            {expiringSoon.map((g) => (
+              <li key={g.id} className="flex items-center gap-2">
+                <span className="font-mono text-xs">#{g.id}</span>
+                <span className="text-xs">
+                  受让人 userId={g.userId} · {g.scopeType}#{g.scopeId}
+                </span>
+                <span className="text-xs">
+                  到期 {new Date(g.expiresAt).toLocaleString("zh-CN")}
+                </span>
+                <button
+                  onClick={() => renew(g)}
+                  className="ml-auto rounded border border-amber-400 bg-white px-2 py-0.5 text-xs hover:bg-amber-100"
+                >
+                  续期 7 天
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-background p-3">
         <div className="flex gap-1 text-sm">
@@ -217,14 +296,22 @@ export default function CrossAuthPage() {
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {new Date(g.createdAt).toLocaleString("zh-CN")}
                     </td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
                       {g.status === "ACTIVE" && (
-                        <button
-                          onClick={() => revoke(g.id)}
-                          className="rounded border px-2 py-1 text-xs hover:bg-accent"
-                        >
-                          撤销
-                        </button>
+                        <>
+                          <button
+                            onClick={() => renew(g)}
+                            className="mr-1 rounded border px-2 py-1 text-xs hover:bg-accent"
+                          >
+                            续期
+                          </button>
+                          <button
+                            onClick={() => revoke(g.id)}
+                            className="rounded border px-2 py-1 text-xs hover:bg-accent"
+                          >
+                            撤销
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>

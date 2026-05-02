@@ -6,8 +6,13 @@ import com.biou.shopifyhub.asset.entity.AssetFile;
 import com.biou.shopifyhub.asset.entity.AssetSnapshot;
 import com.biou.shopifyhub.asset.mapper.AssetFileMapper;
 import com.biou.shopifyhub.asset.mapper.AssetSnapshotMapper;
+import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
+import com.biou.shopifyhub.core.ResultCode;
+import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.file.FileService;
+import com.biou.shopifyhub.store.entity.Store;
+import com.biou.shopifyhub.store.mapper.StoreMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -34,15 +39,18 @@ public class AssetSnapshotController {
     private final AssetFileMapper fileMapper;
     private final FileService fileService;
     private final ObjectMapper objectMapper;
+    private final StoreMapper storeMapper;
 
     public AssetSnapshotController(AssetSnapshotMapper snapshotMapper,
                                    AssetFileMapper fileMapper,
                                    FileService fileService,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper,
+                                   StoreMapper storeMapper) {
         this.snapshotMapper = snapshotMapper;
         this.fileMapper = fileMapper;
         this.fileService = fileService;
         this.objectMapper = objectMapper;
+        this.storeMapper = storeMapper;
     }
 
     @GetMapping
@@ -99,6 +107,36 @@ public class AssetSnapshotController {
         resp.put("completedAt", snap.getCompletedAt());
         resp.put("files", files);
         return Result.ok(resp);
+    }
+
+    /**
+     * T10: 简化版触发资产快照——仅插入 PENDING 行，实际 worker 投递链路待 W2-AST 完整化。
+     * 前端「批量拉资产」依赖此 endpoint，但当前 worker 不会自动消费。
+     */
+    @PostMapping("/trigger")
+    public Result<Long> trigger(@RequestBody TriggerReq req) {
+        if (req == null || req.storeId == null) {
+            throw new BusinessException(ResultCode.VALIDATION_FAILED, "storeId required");
+        }
+        Store store = storeMapper.selectById(req.storeId);
+        if (store == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "store " + req.storeId);
+        }
+        AssetSnapshot snap = new AssetSnapshot();
+        snap.setTenantId(store.getTenantId());
+        snap.setStoreId(req.storeId);
+        snap.setSnapshotType(req.snapshotType != null && !req.snapshotType.isBlank() ? req.snapshotType : "FULL");
+        snap.setStatus("PENDING");
+        snap.setTriggeredBy(CurrentUser.userIdOrNull());
+        snapshotMapper.insert(snap);
+        log.warn("[asset-snapshot] trigger inserted PENDING id={} storeId={} type={}; "
+            + "TODO 实际投 worker 链路待 W2-AST 完整化", snap.getId(), req.storeId, snap.getSnapshotType());
+        return Result.ok(snap.getId());
+    }
+
+    public static class TriggerReq {
+        public Long storeId;
+        public String snapshotType;
     }
 
     @GetMapping("/{id}/manifest")

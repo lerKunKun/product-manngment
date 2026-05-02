@@ -66,22 +66,19 @@ export const taskApi = {
   list: (
     page = 1,
     size = 20,
-    params?: { type?: string; status?: string; storeId?: number }
+    params?: { type?: string; status?: string; storeId?: number; parentTaskId?: number }
   ) =>
     api.get<Page<TaskListItem>>(
       `/task${buildQuery({ page, size, ...(params ?? {}) })}`
     ),
   detail: (id: number) => api.get<TaskDetail>(`/task/${id}`),
   payload: (id: number) => api.get<TaskPayloadResp>(`/task/${id}/payload`),
-  /**
-   * T9: 重试 endpoint。后端 push.TaskController 当前没有 POST /task/{id}/retry，
-   * 调用会 404；前端按钮在不可用时 disabled。保留方法以便后端补 endpoint 后零成本启用。
-   */
-  retry: (id: number) => api.post<TaskListItem>(`/task/${id}/retry`),
+  /** T10: 重试 FAILED 任务，后端会重置 status 为 PENDING 由 worker 重投。 */
+  retry: (id: number) => api.post<number>(`/task/${id}/retry`),
 };
 
-/** T9：后端 push.TaskController 暂未实现 retry endpoint。设为 false 时前端按钮 disabled。 */
-export const TASK_RETRY_AVAILABLE = false;
+/** T10：后端已实现 POST /task/{id}/retry，可用。 */
+export const TASK_RETRY_AVAILABLE = true;
 
 export const TASK_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "全部类型" },

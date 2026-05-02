@@ -73,32 +73,32 @@ export const storeApi = {
     ),
 
   /**
-   * T9: 健康检查兜底——后端没有 /store/{id}/test，
-   * 用 list() 找到该 id 是否仍可读作为健康度信号（验证 token 不属于过期 / uninstalled 状态）。
+   * T10: 健康检查切真——调 GET /store/{id}/test。后端简化版只返回 status / token 是否存在，
+   * 未真调 Shopify shop.json（v1.1 待办）。
    */
   healthCheck: async (id: number): Promise<{ ok: boolean; status?: string; message?: string }> => {
     try {
-      const all = await storeApi.list();
-      const s = all.find((x) => x.id === id);
-      if (!s) return { ok: false, message: "店铺不存在" };
-      if (s.status !== "ACTIVE") {
-        return { ok: false, status: s.status, message: `状态：${s.status}` };
+      const r = await api.get<{ storeId: number; status: string; tokenPresent: boolean; healthy: boolean }>(
+        `/store/${id}/test`
+      );
+      if (!r.healthy) {
+        return { ok: false, status: r.status, message: `状态：${r.status}` };
       }
-      return { ok: true, status: s.status };
+      return { ok: true, status: r.status };
     } catch (e) {
       return { ok: false, message: (e as Error).message };
     }
   },
 
-  /** T9: 批量禁用占位——后端无 disable endpoint，调用会失败。 */
+  /** T10: 禁用店铺 endpoint（敏感操作）。 */
   disable: (id: number, sensitiveToken: string) =>
     api.post<void>(`/store/${id}/disable`, null, {
       headers: { "X-Sensitive-Token": sensitiveToken },
     }),
 };
 
-/** T9：后端 store.StoreController 暂未实现批量禁用 / 健康检查 endpoint。 */
-export const STORE_DISABLE_AVAILABLE = false;
-export const STORE_TEST_ENDPOINT_AVAILABLE = false;
-/** T9：后端无统一的「触发资产快照」endpoint（asset-snapshot 只有 GET），批量拉资产 disabled。 */
-export const ASSET_TRIGGER_AVAILABLE = false;
+/** T10：后端已实现批量禁用 / 健康检查 endpoint，开启。 */
+export const STORE_DISABLE_AVAILABLE = true;
+export const STORE_TEST_ENDPOINT_AVAILABLE = true;
+/** T10：后端已实现 POST /asset-snapshot/trigger，开启批量拉资产。 */
+export const ASSET_TRIGGER_AVAILABLE = true;

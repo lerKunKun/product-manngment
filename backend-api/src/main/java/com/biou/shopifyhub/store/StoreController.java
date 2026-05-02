@@ -90,4 +90,29 @@ public class StoreController {
         service.setDevStore(id, true, uid);
         return Result.ok();
     }
+
+    /** T10: 禁用店铺（status=DISABLED，对齐既有枚举集 ACTIVE/DISABLED/TOKEN_EXPIRED/UNINSTALLED）。敏感操作。 */
+    @RequireSensitiveOp("STORE_BATCH_DISABLE")
+    @PostMapping("/{id}/disable")
+    public Result<Void> disable(@PathVariable Long id) {
+        Store s = service.getById(id);
+        s.setStatus("DISABLED");
+        service.updateStatus(s);
+        return Result.ok();
+    }
+
+    /**
+     * T10: 简化版店铺健康检查——不真调 Shopify shop.json（避免外部网络依赖），
+     * 仅返回基础状态 + token 是否存在。TODO v1.1 加真 ping。
+     */
+    @GetMapping("/{id}/test")
+    public Result<Map<String, Object>> test(@PathVariable Long id) {
+        Store s = service.getById(id);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("storeId", s.getId());
+        resp.put("status", s.getStatus());
+        resp.put("tokenPresent", s.getEncryptedAccessToken() != null && !s.getEncryptedAccessToken().isBlank());
+        resp.put("healthy", "ACTIVE".equals(s.getStatus()));
+        return Result.ok(resp);
+    }
 }

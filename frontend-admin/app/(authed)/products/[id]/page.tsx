@@ -9,10 +9,21 @@ import { SnapshotTriggerDialog } from "@/components/snapshot/SnapshotTriggerDial
 import { PushTriggerDialog } from "@/components/push/PushTriggerDialog";
 import { StoreMappingPanel } from "@/components/product/StoreMappingPanel";
 import { PurchaseTab } from "@/components/product/PurchaseTab";
+import { ProductHistoryTabs } from "@/components/product/ProductHistoryTabs";
 import { PreviewButton } from "@/components/preview/PreviewButton";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 
-type Tab = "basic" | "variants" | "images" | "links" | "purchase" | "docs" | "mapping" | "seo";
+type Tab =
+  | "basic"
+  | "variants"
+  | "images"
+  | "links"
+  | "purchase"
+  | "docs"
+  | "mapping"
+  | "seo"
+  | "snapshotHistory"
+  | "pushHistory";
 
 const KIND_LABEL: Record<string, string> = { AD: "广告贴", BENCHMARK: "对标页", MATERIAL: "产品素材" };
 const inp = "w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -82,6 +93,8 @@ export default function ProductDetailPage() {
     { k: "docs", label: "媒体/需求文档" },
     { k: "mapping", label: "店铺映射" },
     { k: "seo", label: "SEO" },
+    { k: "snapshotHistory", label: "快照历史" },
+    { k: "pushHistory", label: "推送历史" },
   ];
 
   return (
@@ -172,6 +185,12 @@ export default function ProductDetailPage() {
       {tab === "purchase" && <PurchaseTab productId={id} />}
       {tab === "docs" && <DocsTab productId={id} />}
       {tab === "mapping" && <StoreMappingPanel productId={d.product.id} />}
+      {tab === "snapshotHistory" && (
+        <ProductHistoryTabs productId={id} initialTab="snapshot" />
+      )}
+      {tab === "pushHistory" && (
+        <ProductHistoryTabs productId={id} initialTab="push" />
+      )}
       {tab === "seo" && (
         <div className="max-w-2xl space-y-4 rounded-lg border bg-background p-5">
           <Field label="SEO 标题">

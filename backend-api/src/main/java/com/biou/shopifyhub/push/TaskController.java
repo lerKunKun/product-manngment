@@ -3,6 +3,8 @@ package com.biou.shopifyhub.push;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.biou.shopifyhub.core.Result;
+import com.biou.shopifyhub.core.ResultCode;
+import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.push.entity.PushConflict;
 import com.biou.shopifyhub.push.entity.StoreProduct;
 import com.biou.shopifyhub.push.entity.Task;
@@ -15,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -61,12 +64,14 @@ public class TaskController {
         @RequestParam(defaultValue = "20") int size,
         @RequestParam(required = false) String type,
         @RequestParam(required = false) String status,
-        @RequestParam(required = false) Long storeId
+        @RequestParam(required = false) Long storeId,
+        @RequestParam(required = false) Long parentTaskId
     ) {
         LambdaQueryWrapper<Task> q = new LambdaQueryWrapper<>();
         if (type != null && !type.isBlank()) q.eq(Task::getType, type);
         if (status != null && !status.isBlank()) q.eq(Task::getStatus, status);
         if (storeId != null) q.eq(Task::getStoreId, storeId);
+        if (parentTaskId != null) q.eq(Task::getParentTaskId, parentTaskId);
         q.orderByDesc(Task::getId);
 
         Page<Task> p = taskMapper.selectPage(new Page<>(page, size), q);
@@ -175,6 +180,28 @@ public class TaskController {
             resp.put("result", null);
         }
         return Result.ok(resp);
+    }
+
+    /**
+     * T10: 重试失败任务。仅 status=FAILED 可重试；置回 PENDING，清空 errorMessage 与 completedAt，
+     * 实际重投由 worker 拣选 PENDING 任务承担。
+     */
+    @PostMapping("/{id}/retry")
+    public Result<Long> retry(@PathVariable Long id) {
+        Task t = taskMapper.selectById(id);
+        if (t == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "task " + id);
+        }
+        if (!"FAILED".equals(t.getStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                "仅 FAILED 任务可重试，当前 status=" + t.getStatus());
+        }
+        t.setStatus("PENDING");
+        t.setErrorMessage(null);
+        t.setCompletedAt(null);
+        taskMapper.updateById(t);
+        log.info("[task] retry id={} type={} storeId={}", id, t.getType(), t.getStoreId());
+        return Result.ok(t.getId());
     }
 
     // -------------------------------------------------------------- mapping helpers

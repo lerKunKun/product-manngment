@@ -60,6 +60,7 @@ const NAV_GROUPS: {
       { href: "/admin/role", label: "角色管理" },
       { href: "/admin/notification-log", label: "通知日志" },
       { href: "/admin/audit-log", label: "审计日志" },
+      { href: "/admin/ops", label: "备份归档" },
     ],
   },
 ];
