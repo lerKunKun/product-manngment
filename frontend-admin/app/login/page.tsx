@@ -32,8 +32,7 @@ export default function LoginPage() {
           userType: r.userType,
           passwordMustChange: r.passwordMustChange,
         },
-        r.accessToken,
-        r.refreshToken
+        r.accessToken
       );
       router.push("/dashboard");
     } catch (e) {

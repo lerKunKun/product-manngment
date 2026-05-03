@@ -100,6 +100,7 @@ public class ShopifyOAuthController {
         @RequestParam String shop,
         @RequestParam String state,
         @RequestParam(required = false) String hmac,
+        jakarta.servlet.http.HttpServletRequest request,
         HttpServletResponse response
     ) throws IOException {
         ensureConfigured();
@@ -120,8 +121,8 @@ public class ShopifyOAuthController {
             return;
         }
 
-        // 校验 hmac（Shopify 在 callback URL 上带 hmac=...，是 query 参数（除 hmac 外）按字典序拼接 + HMAC-SHA256(api_secret) hex）
-        if (hmac != null && !verifyHmac(Map.of("code", code, "shop", shop, "state", state), hmac)) {
+        // 校验 hmac（Shopify 规则：所有 query 参数除 hmac 外，按 key 字典序拼接 k=v&k=v → HMAC-SHA256(api_secret) hex）
+        if (hmac != null && !verifyHmac(collectHmacParams(request), hmac)) {
             log.warn("Shopify callback hmac mismatch shop={}", shop);
             redirectError(response, "HMAC 校验失败");
             return;
@@ -135,6 +136,8 @@ public class ShopifyOAuthController {
         }
 
         // 写 store 表（已存在则更新 token）
+        // store.scopes 是 MySQL JSON 列；Shopify 返回逗号分隔字符串，必须编码成 JSON 数组字面量再入库
+        String scopesJson = encodeScopesJson(tok.scope());
         Store existing = storeMapper.selectOne(new QueryWrapper<Store>().eq("myshopify_domain", shop));
         if (existing == null) {
             Store s = new Store();
@@ -143,14 +146,14 @@ public class ShopifyOAuthController {
             s.setBrandName(shop);
             s.setTokenType("oauth");
             s.setEncryptedAccessToken(AesGcmUtil.encrypt(tok.accessToken(), aesKey));
-            s.setScopes(tok.scope());
+            s.setScopes(scopesJson);
             s.setIsDevStore(false);
             s.setIsPartnerCollab(false);
             s.setStatus("ACTIVE");
             storeMapper.insert(s);
         } else {
             existing.setEncryptedAccessToken(AesGcmUtil.encrypt(tok.accessToken(), aesKey));
-            existing.setScopes(tok.scope());
+            if (scopesJson != null) existing.setScopes(scopesJson);
             existing.setStatus("ACTIVE");
             existing.setLastRefreshAt(java.time.LocalDateTime.now());
             storeMapper.updateById(existing);
@@ -188,6 +191,38 @@ public class ShopifyOAuthController {
             log.warn("HMAC verify exception: {}", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 收集回调 URL 上除 hmac/signature 外的所有 query 参数用于 HMAC 校验。
+     * Shopify 实际回调常见字段：code, host, shop, state, timestamp（漏一个就 hash 不上）。
+     */
+    private Map<String, String> collectHmacParams(jakarta.servlet.http.HttpServletRequest request) {
+        java.util.TreeMap<String, String> out = new java.util.TreeMap<>();
+        request.getParameterMap().forEach((k, v) -> {
+            if ("hmac".equals(k) || "signature".equals(k)) return;
+            if (v != null && v.length > 0) out.put(k, v[0]);
+        });
+        return out;
+    }
+
+    /** store.scopes 是 MySQL JSON 列；Shopify 返回逗号分隔字符串，编码成 JSON 数组字面量。 */
+    private static String encodeScopesJson(String scope) {
+        if (scope == null) return null;
+        String trimmed = scope.trim();
+        if (trimmed.isEmpty()) return null;
+        if (trimmed.startsWith("[")) return trimmed;
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        for (String p : trimmed.split(",")) {
+            String t = p.trim();
+            if (t.isEmpty()) continue;
+            if (!first) sb.append(',');
+            sb.append('"').append(t.replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
+            first = false;
+        }
+        sb.append(']');
+        return sb.toString();
     }
 
     private static String newState() {

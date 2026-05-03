@@ -3,20 +3,22 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { productApi, type Product } from "@/lib/api/product";
+import { productApi, type ProductListItem } from "@/lib/api/product";
 import { useProducts, useInvalidateProducts } from "@/lib/queries/products";
 import { useToast } from "@/components/ui/Toast";
 import { ErrorBanner, LoadingBlock, EmptyState } from "@/components/ui/StatusBlocks";
 import { useI18n } from "@/lib/i18n/context";
 
-const STATUS_CLS: Record<string, string> = {
-  active: "bg-emerald-100 text-emerald-900 border-emerald-300",
-  draft: "bg-amber-100 text-amber-900 border-amber-300",
-  archived: "bg-zinc-100 text-zinc-500 border-zinc-300",
-};
-
 // Shared grid template — keep header & rows aligned.
-const GRID_COLS = "grid-cols-[40px_60px_1fr_2fr_1fr_80px_140px]";
+// 列：[checkbox 40] [主图 96] [产品名+ID 1fr] [价格 140] [Badge 160]
+const GRID_COLS = "grid-cols-[40px_96px_1fr_140px_160px]";
+
+function formatPrice(price: number | string | null | undefined): string {
+  if (price == null) return "-";
+  const n = typeof price === "string" ? Number(price) : price;
+  if (!Number.isFinite(n)) return "-";
+  return `¥${n.toFixed(2)}`;
+}
 
 export default function ProductsPage() {
   const { t } = useI18n();
@@ -28,12 +30,6 @@ export default function ProductsPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const toast = useToast();
 
-  const STATUS_TEXT: Record<string, string> = {
-    active: t("products.status.active"),
-    draft: t("products.status.draft"),
-    archived: t("products.status.archived"),
-  };
-
   const { data, isPending, error, refetch } = useProducts({
     page,
     size,
@@ -41,7 +37,7 @@ export default function ProductsPage() {
     q: appliedKeyword,
   });
   const invalidateProducts = useInvalidateProducts();
-  const records: Product[] = data?.records ?? [];
+  const records: ProductListItem[] = data?.records ?? [];
   const total = data?.total ?? 0;
 
   const parentRef = useRef<HTMLDivElement>(null);
@@ -49,7 +45,8 @@ export default function ProductsPage() {
   const virtualizer = useVirtualizer({
     count: records.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 44,
+    // 卡片化后行更高（96px 缩略图 + padding）
+    estimateSize: () => 112,
     overscan: 5,
   });
 
@@ -107,9 +104,8 @@ export default function ProductsPage() {
   const virtualItems = virtualizer.getVirtualItems();
   const errorMsg = error ? (error as Error).message : null;
 
-  function renderRowContent(p: Product, checked: boolean) {
-    const cls = STATUS_CLS[p.status] ?? STATUS_CLS.draft;
-    const text = STATUS_TEXT[p.status] ?? STATUS_TEXT.draft;
+  function renderRowContent(p: ProductListItem, checked: boolean) {
+    const shelf = p.shelfStores ?? 0;
     return (
       <>
         <div>
@@ -120,24 +116,49 @@ export default function ProductsPage() {
             aria-label={t("products.selectRow").replace("{handle}", p.handle)}
           />
         </div>
-        <div>{p.id}</div>
-        <div className="truncate font-mono text-xs">
+        {/*
+          主图：故意用 <img> 不用 next/image —— 后端图片域名 (R2 / 用户上传)
+          没有事先在 next.config 的 remotePatterns 白名单，next/image 会报错。
+        */}
+        <div className="flex items-center justify-center">
+          {p.mainImageUrl ? (
+            <img
+              src={p.mainImageUrl}
+              alt={p.title}
+              className="h-20 w-20 rounded-md border object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-20 w-20 items-center justify-center rounded-md border bg-muted text-[10px] text-muted-foreground">
+              {t("products.listCol.noImage")}
+            </div>
+          )}
+        </div>
+        {/* 产品名 + ID（保持可点击进入详情） */}
+        <div className="min-w-0">
           <Link
             href={`/products/${p.id}`}
-            className="text-primary underline-offset-2 hover:underline"
+            className="block truncate font-semibold text-foreground underline-offset-2 hover:text-primary hover:underline"
           >
-            {p.handle}
+            {p.title}
           </Link>
+          <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+            #{p.id} · {p.handle}
+          </div>
         </div>
-        <div className="truncate">{p.title}</div>
-        <div className="truncate text-xs">{p.vendor || "-"}</div>
+        {/* 起价 */}
+        <div className="font-medium tabular-nums">{formatPrice(p.price)}</div>
+        {/* 已上架店铺 / 未上架 Badge */}
         <div>
-          <span className={"inline-block rounded border px-2 py-0.5 text-xs " + cls}>
-            {text}
-          </span>
-        </div>
-        <div className="truncate text-xs text-muted-foreground">
-          {p.createdAt ? new Date(p.createdAt).toLocaleString("zh-CN") : "-"}
+          {shelf > 0 ? (
+            <span className="inline-block rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-900">
+              {t("products.listCol.shelfActive").replace("{count}", String(shelf))}
+            </span>
+          ) : (
+            <span className="inline-block rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600">
+              {t("products.listCol.shelfNone")}
+            </span>
+          )}
         </div>
       </>
     );
@@ -212,12 +233,10 @@ export default function ProductsPage() {
               aria-label={t("products.selectAll")}
             />
           </div>
-          <div>{t("products.column.id")}</div>
-          <div>{t("products.column.handle")}</div>
-          <div>{t("products.column.title")}</div>
-          <div>{t("products.column.vendor")}</div>
-          <div>{t("products.column.status")}</div>
-          <div>{t("products.column.created")}</div>
+          <div className="text-center">{t("products.listCol.image")}</div>
+          <div>{t("products.listCol.name")}</div>
+          <div>{t("products.listCol.price")}</div>
+          <div>{t("products.listCol.shelf")}</div>
         </div>
       </div>
 
@@ -255,7 +274,7 @@ export default function ProductsPage() {
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                   className={
-                    `grid ${GRID_COLS} items-center border-t px-3 text-sm hover:bg-muted/30 ` +
+                    `grid ${GRID_COLS} items-center gap-3 border-t px-3 text-sm hover:bg-muted/30 ` +
                     (checked ? "bg-primary/5" : "")
                   }
                 >
@@ -273,7 +292,7 @@ export default function ProductsPage() {
               <div
                 key={p.id}
                 className={
-                  `grid ${GRID_COLS} items-center border-t px-3 py-2 text-sm hover:bg-muted/30 ` +
+                  `grid ${GRID_COLS} items-center gap-3 border-t px-3 py-3 text-sm hover:bg-muted/30 ` +
                   (checked ? "bg-primary/5" : "")
                 }
               >

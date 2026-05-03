@@ -19,7 +19,9 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 /**
@@ -43,8 +45,8 @@ public class SysAuditLogController {
                                           @RequestParam(required = false) String module,
                                           @RequestParam(required = false) String action,
                                           @RequestParam(required = false) Boolean sensitive,
-                                          @RequestParam(required = false) LocalDateTime from,
-                                          @RequestParam(required = false) LocalDateTime to,
+                                          @RequestParam(required = false) Instant from,
+                                          @RequestParam(required = false) Instant to,
                                           @RequestParam(defaultValue = "1") int page,
                                           @RequestParam(defaultValue = "50") int size) {
         int safeSize = Math.min(Math.max(1, size), 200);
@@ -70,8 +72,8 @@ public class SysAuditLogController {
                                                         @RequestParam(required = false) String module,
                                                         @RequestParam(required = false) String action,
                                                         @RequestParam(required = false) Boolean sensitive,
-                                                        @RequestParam(required = false) LocalDateTime from,
-                                                        @RequestParam(required = false) LocalDateTime to) {
+                                                        @RequestParam(required = false) Instant from,
+                                                        @RequestParam(required = false) Instant to) {
         QueryWrapper<SysAuditLog> q = buildWrapper(userId, module, action, sensitive, from, to);
 
         StreamingResponseBody body = out -> {
@@ -120,14 +122,14 @@ public class SysAuditLogController {
     }
 
     private QueryWrapper<SysAuditLog> buildWrapper(Long userId, String module, String action,
-                                                   Boolean sensitive, LocalDateTime from, LocalDateTime to) {
+                                                   Boolean sensitive, Instant from, Instant to) {
         QueryWrapper<SysAuditLog> q = new QueryWrapper<>();
         if (userId != null) q.eq("user_id", userId);
         if (module != null && !module.isBlank()) q.eq("module", module);
         if (action != null && !action.isBlank()) q.eq("action", action);
         if (sensitive != null) q.eq("`sensitive`", sensitive);
-        if (from != null) q.ge("created_at", from);
-        if (to != null) q.le("created_at", to);
+        if (from != null) q.ge("created_at", LocalDateTime.ofInstant(from, ZoneId.systemDefault()));
+        if (to != null) q.le("created_at", LocalDateTime.ofInstant(to, ZoneId.systemDefault()));
         q.orderByDesc("id");
         return q;
     }

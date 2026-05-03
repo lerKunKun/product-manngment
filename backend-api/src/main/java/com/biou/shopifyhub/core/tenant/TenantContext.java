@@ -14,7 +14,11 @@ public final class TenantContext {
     private TenantContext() {}
 
     public static void set(Long tenantId, String tenantCode, Long userId, String username) {
-        HOLDER.set(new Ctx(tenantId, tenantCode, userId, username));
+        set(tenantId, tenantCode, userId, username, null);
+    }
+
+    public static void set(Long tenantId, String tenantCode, Long userId, String username, String sid) {
+        HOLDER.set(new Ctx(tenantId, tenantCode, userId, username, sid));
     }
 
     public static Ctx current() { return HOLDER.get(); }
@@ -25,7 +29,9 @@ public final class TenantContext {
 
     public static String username() { return HOLDER.get() == null ? null : HOLDER.get().username; }
 
+    public static String sid() { return HOLDER.get() == null ? null : HOLDER.get().sid; }
+
     public static void clear() { HOLDER.remove(); }
 
-    public record Ctx(Long tenantId, String tenantCode, Long userId, String username) {}
+    public record Ctx(Long tenantId, String tenantCode, Long userId, String username, String sid) {}
 }

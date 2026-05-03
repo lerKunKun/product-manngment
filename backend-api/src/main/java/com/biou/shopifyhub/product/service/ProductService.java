@@ -13,12 +13,18 @@ import com.biou.shopifyhub.product.entity.ProductVariant;
 import com.biou.shopifyhub.product.mapper.ProductImageMapper;
 import com.biou.shopifyhub.product.mapper.ProductMapper;
 import com.biou.shopifyhub.product.mapper.ProductVariantMapper;
+import com.biou.shopifyhub.push.entity.StoreProduct;
+import com.biou.shopifyhub.push.mapper.StoreProductMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +39,7 @@ public class ProductService {
     private final ProductMapper productMapper;
     private final ProductVariantMapper variantMapper;
     private final ProductImageMapper imageMapper;
+    private final StoreProductMapper storeProductMapper;
     private final ProductStatusBroadcaster productStatusBroadcaster;
     private final CacheService cacheService;
 
@@ -40,12 +47,14 @@ public class ProductService {
         ProductMapper productMapper,
         ProductVariantMapper variantMapper,
         ProductImageMapper imageMapper,
+        StoreProductMapper storeProductMapper,
         ProductStatusBroadcaster productStatusBroadcaster,
         CacheService cacheService
     ) {
         this.productMapper = productMapper;
         this.variantMapper = variantMapper;
         this.imageMapper = imageMapper;
+        this.storeProductMapper = storeProductMapper;
         this.productStatusBroadcaster = productStatusBroadcaster;
         this.cacheService = cacheService;
     }
@@ -62,6 +71,106 @@ public class ProductService {
                 .or().like("tags", keyword));
         }
         return productMapper.selectPage(new Page<>(page, size), q);
+    }
+
+    /**
+     * 列表分页 + 卡片化补充字段（首图、起价、已上架店铺数）。
+     *
+     * <p>返回结构：{records:[{...product, mainImageUrl, price, shelfStores}], total, page, size}
+     *
+     * <p>实现走 N+1 batch（不是 N+1 循环）：
+     * <ol>
+     *   <li>1 次 selectPage 拿当前页 productIds（最多 size 条）</li>
+     *   <li>1 次 product_image WHERE product_id IN (...) AND position = 1
+     *       — 命中 idx_product (product_id, position) 前缀</li>
+     *   <li>1 次 product_variant WHERE product_id IN (...) — 命中 idx_product (product_id)
+     *       前缀；MIN(price) 在 Java 端取，避免上 GROUP BY 自定义 SQL</li>
+     *   <li>1 次 store_product WHERE product_id IN (...) AND status = 'ACTIVE'
+     *       — 命中 V27 新加的 idx_storeprod_product_status (product_id, status)</li>
+     * </ol>
+     * 总计 4 条 SQL；产品数翻倍也只多 IN 列表里的元素数，不会变成 4N。
+     */
+    public Map<String, Object> listWithCardInfo(int page, int size, String keyword, String status, Long ownerCompanyId) {
+        IPage<Product> p = list(page, size, keyword, status, ownerCompanyId);
+        List<Product> products = p.getRecords();
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("total", p.getTotal());
+        resp.put("page", p.getCurrent());
+        resp.put("size", p.getSize());
+
+        if (products.isEmpty()) {
+            resp.put("records", Collections.emptyList());
+            return resp;
+        }
+
+        List<Long> ids = new ArrayList<>(products.size());
+        for (Product prod : products) ids.add(prod.getId());
+
+        // ----- 1) 主图：position=1 优先；如某产品没有 position=1 的图，回退到 position 最小的 -----
+        Map<Long, String> mainImageByProductId = new HashMap<>(ids.size());
+        List<ProductImage> images = imageMapper.selectList(
+            new QueryWrapper<ProductImage>()
+                .in("product_id", ids)
+                .orderByAsc("position"));
+        for (ProductImage img : images) {
+            // putIfAbsent 保留 position 最小（已 ORDER BY position ASC）的那张
+            mainImageByProductId.putIfAbsent(img.getProductId(), img.getSrc());
+        }
+
+        // ----- 2) 起价：每个产品 variant 价格最小值 -----
+        Map<Long, BigDecimal> minPriceByProductId = new HashMap<>(ids.size());
+        List<ProductVariant> variants = variantMapper.selectList(
+            new QueryWrapper<ProductVariant>()
+                .select("product_id", "price")
+                .in("product_id", ids));
+        for (ProductVariant v : variants) {
+            BigDecimal price = v.getPrice();
+            if (price == null) continue;
+            BigDecimal cur = minPriceByProductId.get(v.getProductId());
+            if (cur == null || price.compareTo(cur) < 0) {
+                minPriceByProductId.put(v.getProductId(), price);
+            }
+        }
+
+        // ----- 3) 已上架店铺数：store_product.status = 'ACTIVE' 即视为已成功上架 -----
+        Map<Long, Integer> shelfStoresByProductId = new HashMap<>(ids.size());
+        List<StoreProduct> mappings = storeProductMapper.selectList(
+            new QueryWrapper<StoreProduct>()
+                .select("product_id", "status")
+                .in("product_id", ids)
+                .eq("status", "ACTIVE"));
+        for (StoreProduct m : mappings) {
+            shelfStoresByProductId.merge(m.getProductId(), 1, Integer::sum);
+        }
+
+        // ----- 拼装 -----
+        List<Map<String, Object>> records = new ArrayList<>(products.size());
+        for (Product prod : products) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", prod.getId());
+            row.put("ownerCompanyId", prod.getOwnerCompanyId());
+            row.put("ownerDeptId", prod.getOwnerDeptId());
+            row.put("handle", prod.getHandle());
+            row.put("title", prod.getTitle());
+            row.put("vendor", prod.getVendor());
+            row.put("productCategory", prod.getProductCategory());
+            row.put("type", prod.getType());
+            row.put("tags", prod.getTags());
+            row.put("published", prod.getPublished());
+            row.put("seoTitle", prod.getSeoTitle());
+            row.put("seoDescription", prod.getSeoDescription());
+            row.put("status", prod.getStatus());
+            row.put("createdAt", prod.getCreatedAt());
+            row.put("updatedAt", prod.getUpdatedAt());
+            // 卡片化新增字段
+            row.put("mainImageUrl", mainImageByProductId.get(prod.getId()));
+            row.put("price", minPriceByProductId.get(prod.getId()));
+            row.put("shelfStores", shelfStoresByProductId.getOrDefault(prod.getId(), 0));
+            records.add(row);
+        }
+        resp.put("records", records);
+        return resp;
     }
 
     /** 详情：基础信息 + 变体 + 图片。W3-PERF-01 走 Redis 缓存，DTO 是 LinkedHashMap，可序列化无 lazy 关联问题。 */

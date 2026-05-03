@@ -3,6 +3,7 @@ package com.biou.shopifyhub.auth.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.biou.shopifyhub.auth.dingtalk.DingTalkClient;
 import com.biou.shopifyhub.auth.dto.LoginResponse;
+import com.biou.shopifyhub.auth.dto.LoginResult;
 import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.entity.SysRole;
 import com.biou.shopifyhub.core.entity.SysUser;
@@ -12,6 +13,7 @@ import com.biou.shopifyhub.core.mapper.SysRoleMapper;
 import com.biou.shopifyhub.core.mapper.SysUserMapper;
 import com.biou.shopifyhub.core.mapper.SysUserRoleMapper;
 import com.biou.shopifyhub.core.security.JwtUtil;
+import com.biou.shopifyhub.core.security.SessionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,21 +41,25 @@ public class DingTalkLoginService {
     private final SysUserRoleMapper userRoleMapper;
     private final SysRoleMapper roleMapper;
     private final JwtUtil jwtUtil;
+    private final SessionService sessionService;
 
     public DingTalkLoginService(
         SysUserMapper userMapper,
         SysUserRoleMapper userRoleMapper,
         SysRoleMapper roleMapper,
-        JwtUtil jwtUtil
+        JwtUtil jwtUtil,
+        SessionService sessionService
     ) {
         this.userMapper = userMapper;
         this.userRoleMapper = userRoleMapper;
         this.roleMapper = roleMapper;
         this.jwtUtil = jwtUtil;
+        this.sessionService = sessionService;
     }
 
     @Transactional
-    public LoginResponse loginOrRegister(DingTalkClient.DingTalkUser dtUser, String tenantCode) {
+    public LoginResult loginOrRegister(DingTalkClient.DingTalkUser dtUser, String tenantCode,
+                                        String clientIp, String userAgent) {
         if (dtUser.unionId() == null || dtUser.unionId().isBlank()) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "钉钉返回缺 unionId");
         }
@@ -74,29 +80,32 @@ public class DingTalkLoginService {
         user.setLastLoginAt(LocalDateTime.now());
         userMapper.updateById(user);
 
+        String sid = sessionService.newSid();
         Map<String, Object> claims = new HashMap<>();
         claims.put("ut", user.getUserType());
         claims.put("tid", user.getDefaultTenantId());
 
         String access, refresh;
         try {
-            access = jwtUtil.issueAccess(user.getId(), user.getUsername(), claims);
-            refresh = jwtUtil.issueRefresh(user.getId(), user.getUsername());
+            access = jwtUtil.issueAccess(user.getId(), user.getUsername(), sid, claims);
+            refresh = jwtUtil.issueRefresh(user.getId(), user.getUsername(), sid);
         } catch (IllegalStateException e) {
             log.warn("JWT keys missing, returning stub. err={}", e.getMessage());
             access = "stub-access-" + user.getId();
             refresh = "stub-refresh-" + user.getId();
         }
 
-        return new LoginResponse(
+        sessionService.create(user.getId(), sid, userAgent, clientIp);
+
+        LoginResponse resp = new LoginResponse(
             user.getId(),
             user.getUsername(),
             user.getEmployeeNo(),
             user.getUserType(),
             fresh || Boolean.TRUE.equals(user.getPasswordMustChange()),
-            access,
-            refresh
+            access
         );
+        return new LoginResult(resp, refresh);
     }
 
     private SysUser autoRegister(DingTalkClient.DingTalkUser dt) {

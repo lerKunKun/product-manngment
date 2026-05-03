@@ -11,6 +11,9 @@ export type Me = {
   expiresAt?: string;
   passwordMustChange: boolean;
   dingtalkUserId?: string;
+  avatarUrl?: string;
+  position?: string;
+  companyName?: string;
 };
 
 export const userApi = {

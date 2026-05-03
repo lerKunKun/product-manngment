@@ -1,36 +1,43 @@
 "use client";
 
 import { Suspense, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/store";
 
 function Inner() {
-  const params = useSearchParams();
   const router = useRouter();
-  const setSession = useAuthStore((s) => s.setSession);
 
   useEffect(() => {
-    const accessToken = params.get("accessToken");
-    const refreshToken = params.get("refreshToken");
-    const userId = params.get("userId");
-    const username = params.get("username");
-    const pwdMustChange = params.get("pwdMustChange") === "true";
-
-    if (accessToken && refreshToken && userId && username) {
-      setSession(
-        {
-          userId: Number(userId),
-          username,
-          passwordMustChange: pwdMustChange,
-        },
-        accessToken,
-        refreshToken
-      );
-      router.replace("/dashboard");
-    } else {
-      router.replace("/login?error=missing-params");
-    }
-  }, [params, router, setSession]);
+    // 钉钉回调已把 refresh 写进 httpOnly cookie。这里调 /auth/refresh 凭 cookie 拿新 access + 用户信息。
+    (async () => {
+      try {
+        const resp = await fetch("/api/auth/refresh", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        });
+        const body = await resp.json().catch(() => null);
+        if (!body || body.code !== 0 || !body.data) {
+          router.replace("/login?error=dingtalk-refresh-failed");
+          return;
+        }
+        const d = body.data;
+        useAuthStore.getState().setSession(
+          {
+            userId: d.userId,
+            username: d.username,
+            employeeNo: d.employeeNo,
+            userType: d.userType,
+            passwordMustChange: d.passwordMustChange,
+          },
+          d.accessToken
+        );
+        router.replace("/dashboard");
+      } catch {
+        router.replace("/login?error=dingtalk-network");
+      }
+    })();
+  }, [router]);
 
   return (
     <main className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">

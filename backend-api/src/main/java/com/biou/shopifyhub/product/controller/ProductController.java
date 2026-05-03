@@ -1,6 +1,5 @@
 package com.biou.shopifyhub.product.controller;
 
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.biou.shopifyhub.auth.sensitive.RequireSensitiveOp;
 import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
@@ -8,7 +7,6 @@ import com.biou.shopifyhub.product.entity.Product;
 import com.biou.shopifyhub.product.service.ProductService;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestController
@@ -29,13 +27,9 @@ public class ProductController {
         @RequestParam(required = false) String status,
         @RequestParam(required = false) Long ownerCompanyId
     ) {
-        IPage<Product> p = service.list(page, size, keyword, status, ownerCompanyId);
-        Map<String, Object> resp = new LinkedHashMap<>();
-        resp.put("records", p.getRecords());
-        resp.put("total", p.getTotal());
-        resp.put("page", p.getCurrent());
-        resp.put("size", p.getSize());
-        return Result.ok(resp);
+        // 走 listWithCardInfo：返回的 records 是已带 mainImageUrl/price/shelfStores
+        // 卡片化字段的 Map，前端列表页直接渲染，不必再请求详情。
+        return Result.ok(service.listWithCardInfo(page, size, keyword, status, ownerCompanyId));
     }
 
     @GetMapping("/{id}")

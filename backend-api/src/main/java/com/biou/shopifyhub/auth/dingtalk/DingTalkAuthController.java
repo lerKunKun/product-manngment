@@ -1,10 +1,12 @@
 package com.biou.shopifyhub.auth.dingtalk;
 
-import com.biou.shopifyhub.auth.dto.LoginResponse;
+import com.biou.shopifyhub.auth.dto.LoginResult;
 import com.biou.shopifyhub.auth.service.DingTalkLoginService;
 import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
+import com.biou.shopifyhub.core.security.CookieUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +39,7 @@ public class DingTalkAuthController {
     private final DingTalkClient client;
     private final DingTalkStateService stateService;
     private final DingTalkLoginService loginService;
+    private final CookieUtil cookieUtil;
 
     @Value("${dingtalk.qr-connect-url:https://login.dingtalk.com/oauth2/auth}")
     private String qrConnectUrl;
@@ -51,12 +54,14 @@ public class DingTalkAuthController {
         DingTalkProperties props,
         DingTalkClient client,
         DingTalkStateService stateService,
-        DingTalkLoginService loginService
+        DingTalkLoginService loginService,
+        CookieUtil cookieUtil
     ) {
         this.props = props;
         this.client = client;
         this.stateService = stateService;
         this.loginService = loginService;
+        this.cookieUtil = cookieUtil;
     }
 
     @GetMapping("/qrcode")
@@ -79,6 +84,7 @@ public class DingTalkAuthController {
         @RequestParam(value = "authCode", required = false) String authCode,
         @RequestParam(value = "code", required = false) String codeAlias,
         @RequestParam String state,
+        HttpServletRequest request,
         HttpServletResponse response
     ) throws IOException {
         ensureConfigured();
@@ -92,16 +98,15 @@ public class DingTalkAuthController {
         DingTalkClient.DingTalkUser dtUser = client.getMe(tok.accessToken());
         log.info("[dingtalk-callback] tenant={} unionId={} nick={}", std.tenantCode(), dtUser.unionId(), dtUser.nick());
 
-        LoginResponse login = loginService.loginOrRegister(dtUser, std.tenantCode());
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isBlank()) ip = request.getRemoteAddr();
+        else ip = ip.split(",")[0].trim();
+        String ua = request.getHeader("User-Agent");
 
-        // 跳前端，把 token 暂时放 query。生产改 postMessage / 一次性 ticket。
-        String dest = frontendRedirect + "/login/dingtalk-success"
-            + "?accessToken=" + enc(login.accessToken())
-            + "&refreshToken=" + enc(login.refreshToken())
-            + "&userId=" + login.userId()
-            + "&username=" + enc(login.username())
-            + "&pwdMustChange=" + login.passwordMustChange();
-        response.sendRedirect(dest);
+        LoginResult result = loginService.loginOrRegister(dtUser, std.tenantCode(), ip, ua);
+        // refresh 进 httpOnly cookie；access 也不再放 URL — 前端进 success 页后调 /auth/refresh 凭 cookie 拿新 access
+        cookieUtil.writeRefresh(response, result.refreshToken());
+        response.sendRedirect(frontendRedirect + "/login/dingtalk-success");
     }
 
     @PostMapping("/event")

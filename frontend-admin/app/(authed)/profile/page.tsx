@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { userApi, type Me } from "@/lib/api/user";
 import type { ApiError } from "@/lib/api/client";
+import { authApi, type SessionView } from "@/lib/api/auth";
 import {
   notificationApi,
   CATEGORY_LABEL,
@@ -72,14 +73,39 @@ export default function ProfilePage() {
   if (!me) return null;
 
   const successPrefix = t("profile.password.success");
+
+  async function bindDingtalk() {
+    try {
+      const r = await authApi.dingtalkQrcode();
+      window.location.href = r.oauthUrl;
+    } catch (e) {
+      setError((e as ApiError).message);
+    }
+  }
+
   return (
     <div className="max-w-2xl space-y-6">
       <h1 className="text-2xl font-semibold">{t("profile.title")}</h1>
+
+      <div className="flex items-center gap-4 rounded-lg border bg-background p-5">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={me.avatarUrl || "/assets/defaults/avatar.png"}
+          alt={me.username}
+          className="h-20 w-20 rounded-full object-cover ring-1 ring-border"
+        />
+        <div className="min-w-0">
+          <div className="truncate text-base font-semibold">{me.username}</div>
+          <div className="truncate text-sm text-muted-foreground">{me.email || "-"}</div>
+        </div>
+      </div>
 
       <section className="rounded-lg border bg-background p-5">
         <h2 className="mb-3 text-base font-medium">{t("profile.basicInfo")}</h2>
         <dl className="space-y-2 text-sm">
           <Row label={t("profile.field.employeeNo")} value={me.employeeNo} />
+          <Row label={t("profile.field.companyName")} value={me.companyName ?? "-"} />
+          <Row label={t("profile.field.position")} value={me.position ?? "-"} />
           <Row label={t("profile.field.username")} value={me.username} />
           <Row label={t("profile.field.email")} value={me.email || "-"} />
           <Row
@@ -95,7 +121,22 @@ export default function ProfilePage() {
           )}
           <Row
             label={t("profile.field.dingtalkBound")}
-            value={me.dingtalkUserId ? t("profile.dingtalk.bound") : t("profile.dingtalk.unbound")}
+            value={
+              me.dingtalkUserId ? (
+                t("profile.dingtalk.bound")
+              ) : (
+                <span className="inline-flex items-center gap-2">
+                  <span>{t("profile.dingtalk.unbound")}</span>
+                  <button
+                    type="button"
+                    onClick={bindDingtalk}
+                    className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground"
+                  >
+                    {t("profile.dingtalk.bindBtn")}
+                  </button>
+                </span>
+              )
+            }
           />
         </dl>
         {me.passwordMustChange && (
@@ -151,8 +192,112 @@ export default function ProfilePage() {
         </form>
       </section>
 
+      <SessionsSection />
       <SubscriptionSection />
     </div>
+  );
+}
+
+function SessionsSection() {
+  const { t } = useI18n();
+  const [list, setList] = useState<SessionView[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setErr("");
+    try {
+      const data = await authApi.sessions();
+      setList(data ?? []);
+    } catch (e) {
+      setErr((e as ApiError).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function kickOthers() {
+    if (!confirm(t("profile.sessions.confirmKick"))) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await authApi.kickOthers();
+      setMsg(t("profile.sessions.kicked").replace("{count}", String(r.kicked)));
+      await load();
+    } catch (e) {
+      setMsg((e as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const otherCount = (list ?? []).filter((s) => !s.current).length;
+
+  return (
+    <section className="rounded-lg border bg-background p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-base font-medium">{t("profile.sessions.title")}</h2>
+        <button
+          onClick={kickOthers}
+          disabled={busy || otherCount === 0}
+          className="rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground disabled:opacity-50"
+        >
+          {busy ? t("profile.sessions.kicking") : t("profile.sessions.kickOthers")}
+        </button>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        {t("profile.sessions.hint")}
+      </p>
+      {msg && (
+        <p className="mb-3 text-xs text-emerald-700">{msg}</p>
+      )}
+      {err && (
+        <p className="mb-3 text-xs text-destructive">{err}</p>
+      )}
+      {loading ? (
+        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
+      ) : !list || list.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("profile.sessions.empty")}</p>
+      ) : (
+        <ul className="divide-y rounded-md border">
+          {list.map((s) => (
+            <li key={s.info.sid} className="flex items-start justify-between gap-3 p-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">
+                  {s.info.label}
+                  {s.current && (
+                    <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                      {t("profile.sessions.current")}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 truncate text-xs text-muted-foreground" title={s.info.userAgent}>
+                  {s.info.userAgent || "-"}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-muted-foreground">
+                  <span>IP：{s.info.ip || "-"}</span>
+                  <span>
+                    {t("profile.sessions.loginAt")}：
+                    {new Date(s.info.loginAt).toLocaleString("zh-CN")}
+                  </span>
+                  <span>
+                    {t("profile.sessions.lastSeen")}：
+                    {new Date(s.info.lastSeenAt).toLocaleString("zh-CN")}
+                  </span>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

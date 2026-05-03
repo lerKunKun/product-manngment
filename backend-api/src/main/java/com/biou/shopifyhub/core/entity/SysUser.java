@@ -23,6 +23,8 @@ public class SysUser {
     private String dingtalkUserid;
     private String dingtalkCorpId;
     private Long defaultTenantId;
+    private String avatarUrl;
+    private String position;
     /** STAFF / TEMP */
     private String userType;
     /** 仅 TEMP：账号到期时间 */
@@ -68,6 +70,10 @@ public class SysUser {
     public void setDingtalkCorpId(String dingtalkCorpId) { this.dingtalkCorpId = dingtalkCorpId; }
     public Long getDefaultTenantId() { return defaultTenantId; }
     public void setDefaultTenantId(Long defaultTenantId) { this.defaultTenantId = defaultTenantId; }
+    public String getAvatarUrl() { return avatarUrl; }
+    public void setAvatarUrl(String avatarUrl) { this.avatarUrl = avatarUrl; }
+    public String getPosition() { return position; }
+    public void setPosition(String position) { this.position = position; }
     public String getUserType() { return userType; }
     public void setUserType(String userType) { this.userType = userType; }
     public LocalDateTime getExpiresAt() { return expiresAt; }

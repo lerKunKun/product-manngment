@@ -5,6 +5,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
 import { useEffect, useState } from "react";
+import { sanitizeHtml } from "@/lib/security/sanitize";
 
 type Mode = "edit" | "html" | "preview";
 
@@ -170,7 +171,11 @@ export function RichTextEditor({ value, onChange, placeholder, onUploadImage }: 
       {mode === "preview" && (
         <div
           className="prose prose-sm max-w-none px-3 py-2"
-          dangerouslySetInnerHTML={{ __html: htmlSource || "<p class='text-muted-foreground'>无内容</p>" }}
+          dangerouslySetInnerHTML={{
+            __html: htmlSource
+              ? sanitizeHtml(htmlSource)
+              : "<p class='text-muted-foreground'>无内容</p>",
+          }}
         />
       )}
     </div>

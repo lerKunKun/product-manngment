@@ -36,7 +36,7 @@ public class JwtUtil implements InitializingBean {
         // dev 阶段允许双 null：JWT 功能不可用但应用能起来
     }
 
-    public String issueAccess(long userId, String username, Map<String, Object> claims) {
+    public String issueAccess(long userId, String username, String sid, Map<String, Object> claims) {
         require(privateKey, "JWT_PRIVATE_KEY 未配置");
         Instant now = Instant.now();
         return Jwts.builder()
@@ -44,6 +44,7 @@ public class JwtUtil implements InitializingBean {
             .subject(String.valueOf(userId))
             .claim("uname", username)
             .claim("typ", "access")
+            .claim("sid", sid)
             .claims(claims)
             .issuedAt(java.util.Date.from(now))
             .expiration(java.util.Date.from(now.plus(props.getAccessTtl())))
@@ -51,7 +52,7 @@ public class JwtUtil implements InitializingBean {
             .compact();
     }
 
-    public String issueRefresh(long userId, String username) {
+    public String issueRefresh(long userId, String username, String sid) {
         require(privateKey, "JWT_PRIVATE_KEY 未配置");
         Instant now = Instant.now();
         return Jwts.builder()
@@ -59,6 +60,7 @@ public class JwtUtil implements InitializingBean {
             .subject(String.valueOf(userId))
             .claim("uname", username)
             .claim("typ", "refresh")
+            .claim("sid", sid)
             .issuedAt(java.util.Date.from(now))
             .expiration(java.util.Date.from(now.plus(props.getRefreshTtl())))
             .signWith(privateKey, Jwts.SIG.RS256)

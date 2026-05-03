@@ -6,10 +6,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.util.stream.Collectors;
 
@@ -39,6 +44,48 @@ public class GlobalExceptionHandler {
             detail = e.getMessage();
         }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Result.error(ResultCode.VALIDATION_FAILED, detail));
+    }
+
+    /**
+     * @RequestParam / @PathVariable 类型转换失败（如 Long 字段收到 "abc" 或空串）。
+     * 之前走 fallback Exception → 500 + 仅类名。改成 400 + 显示参数名/值/期望类型。
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Result<Void>> typeMismatch(MethodArgumentTypeMismatchException e) {
+        String name = e.getName();
+        Object value = e.getValue();
+        String expected = e.getRequiredType() == null ? "?" : e.getRequiredType().getSimpleName();
+        String detail = "参数 " + name + "=\"" + value + "\" 不能转成 " + expected;
+        log.warn("ParamTypeMismatch: {}", detail);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Result.error(ResultCode.VALIDATION_FAILED, detail));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Result<Void>> missingParam(MissingServletRequestParameterException e) {
+        String detail = "缺少必填参数 " + e.getParameterName() + " (" + e.getParameterType() + ")";
+        log.warn("MissingParam: {}", detail);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Result.error(ResultCode.VALIDATION_FAILED, detail));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Result<Void>> badJson(HttpMessageNotReadableException e) {
+        log.warn("BadJson: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Result.error(ResultCode.VALIDATION_FAILED, "请求体格式错误"));
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Result<Void>> methodNotAllowed(HttpRequestMethodNotSupportedException e) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+            .body(Result.error(ResultCode.VALIDATION_FAILED, "方法不支持: " + e.getMethod()));
+    }
+
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<Result<Void>> notFound(NoHandlerFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(Result.error(ResultCode.NOT_FOUND, e.getRequestURL()));
     }
 
     @ExceptionHandler(Exception.class)

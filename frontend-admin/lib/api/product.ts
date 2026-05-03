@@ -19,6 +19,20 @@ export type Product = {
   updatedAt?: string;
 };
 
+/**
+ * 列表页卡片化字段（仅 list 端点返回，详情端点不带）。
+ * 后端在 service 层一次性 batch 查 product_image / product_variant /
+ * store_product 后拼装，避免 N+1。
+ */
+export type ProductListItem = Product & {
+  /** position=1 / position 最小的产品图 src；无图为 null */
+  mainImageUrl?: string | null;
+  /** 所有 variant 中最低 price；无 variant 为 null。后端类型 BigDecimal，序列化常见为 string，也可能是 number */
+  price?: number | string | null;
+  /** store_product.status='ACTIVE' 的店铺数；从未推送/全部失败为 0 */
+  shelfStores?: number;
+};
+
 export type ProductVariant = {
   id: number;
   productId: number;
@@ -51,7 +65,7 @@ export type ProductDetail = {
 };
 
 export type ProductListPage = {
-  records: Product[];
+  records: ProductListItem[];
   total: number;
   page: number;
   size: number;

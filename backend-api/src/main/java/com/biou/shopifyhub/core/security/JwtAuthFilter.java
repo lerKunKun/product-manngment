@@ -27,10 +27,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
     private final StringRedisTemplate redis;
+    private final SessionService sessionService;
 
-    public JwtAuthFilter(JwtUtil jwtUtil, StringRedisTemplate redis) {
+    public JwtAuthFilter(JwtUtil jwtUtil, StringRedisTemplate redis, SessionService sessionService) {
         this.jwtUtil = jwtUtil;
         this.redis = redis;
+        this.sessionService = sessionService;
     }
 
     @Override
@@ -48,15 +50,21 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 Long userId = Long.parseLong(c.getSubject());
                 String username = c.get("uname", String.class);
                 Long tenantId = c.get("tid", Long.class);
+                String sid = c.get("sid", String.class);
 
-                TenantContext.set(tenantId, null, userId, username);
+                // 没 sid（旧 token） 或 session 已被踢 → 拒签（让 SecurityFilterChain 抛 401）
+                if (sid == null || !sessionService.exists(userId, sid)) {
+                    throw new JwtException("session revoked");
+                }
+
+                TenantContext.set(tenantId, null, userId, username, sid);
 
                 UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                     username, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))
                 );
                 SecurityContextHolder.getContext().setAuthentication(auth);
             } catch (JwtException | IllegalArgumentException | IllegalStateException e) {
-                log.debug("JWT parse failed: {}", e.getMessage());
+                log.debug("JWT parse/session check failed: {}", e.getMessage());
             }
         }
 

@@ -1,17 +1,21 @@
 package com.biou.shopifyhub.auth;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.entity.SysUser;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.core.mapper.SysUserMapper;
+import com.biou.shopifyhub.org.entity.SysOrg;
+import com.biou.shopifyhub.org.mapper.SysOrgMapper;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -19,9 +23,11 @@ import java.util.Map;
 public class UserProfileController {
 
     private final SysUserMapper userMapper;
+    private final SysOrgMapper orgMapper;
 
-    public UserProfileController(SysUserMapper userMapper) {
+    public UserProfileController(SysUserMapper userMapper, SysOrgMapper orgMapper) {
         this.userMapper = userMapper;
+        this.orgMapper = orgMapper;
     }
 
     @GetMapping("/me")
@@ -40,6 +46,21 @@ public class UserProfileController {
         dto.put("expiresAt", u.getExpiresAt());
         dto.put("passwordMustChange", u.getPasswordMustChange());
         dto.put("dingtalkUserId", u.getDingtalkUserid());
+        dto.put("avatarUrl", u.getAvatarUrl());
+        dto.put("position", u.getPosition());
+        // companyName: 通过 default_tenant_id 关联 sys_org 的 COMPANY 节点取 name
+        String companyName = null;
+        if (u.getDefaultTenantId() != null) {
+            QueryWrapper<SysOrg> q = new QueryWrapper<>();
+            q.eq("tenant_id", u.getDefaultTenantId())
+             .eq("type", "COMPANY")
+             .last("LIMIT 1");
+            List<SysOrg> orgs = orgMapper.selectList(q);
+            if (!orgs.isEmpty()) {
+                companyName = orgs.get(0).getName();
+            }
+        }
+        dto.put("companyName", companyName);
         return Result.ok(dto);
     }
 

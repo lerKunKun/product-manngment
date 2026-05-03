@@ -7,6 +7,7 @@ import { inboxApi, type InappMessage } from "@/lib/api/inbox";
 import type { ApiError } from "@/lib/api/client";
 import { useI18n } from "@/lib/i18n/context";
 import type { MessageKey } from "@/lib/i18n/messages";
+import { sanitizeHtml } from "@/lib/security/sanitize";
 
 const PAGE_SIZE = 20;
 
@@ -280,8 +281,8 @@ export default function InboxPage() {
                           {m.bodyHtml ? (
                             <div
                               className="prose prose-sm max-w-none text-foreground"
-                              // 注意：bodyHtml 来源于后端 EmailTemplateRenderer 等可控渲染，未引入富文本编辑器
-                              dangerouslySetInnerHTML={{ __html: m.bodyHtml }}
+                              // 必经 sanitizeHtml：阻断模板里被注入的 <script>/onerror/javascript: 等
+                              dangerouslySetInnerHTML={{ __html: sanitizeHtml(m.bodyHtml) }}
                             />
                           ) : (
                             <pre className="whitespace-pre-wrap break-words font-sans text-sm text-foreground">
