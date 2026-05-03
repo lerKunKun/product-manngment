@@ -3,6 +3,11 @@ spring:
     name: shopifyhub-backend
   profiles:
     active: ${APP_ENV:dev}
+  servlet:
+    multipart:
+      # 产品图 / 文档 / 视频上传限制；env 可覆盖
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:100MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:200MB}
 
 server:
   port: ${APP_PORT:8080}

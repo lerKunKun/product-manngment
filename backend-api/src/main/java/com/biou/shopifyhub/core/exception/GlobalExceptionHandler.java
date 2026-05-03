@@ -14,6 +14,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.util.stream.Collectors;
@@ -86,6 +87,22 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> notFound(NoHandlerFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
             .body(Result.error(ResultCode.NOT_FOUND, e.getRequestURL()));
+    }
+
+    /**
+     * 上传超过 multipart 限制（默认 100MB / 单文件，200MB / 请求；env 可覆盖
+     * UPLOAD_MAX_FILE_SIZE / UPLOAD_MAX_REQUEST_SIZE）。
+     * 之前走 fallback 500 + 仅类名；改成 413 + 当前限额提示。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<Void>> tooLarge(MaxUploadSizeExceededException e) {
+        long maxBytes = e.getMaxUploadSize();
+        String hint = maxBytes > 0
+            ? "文件超过上传限制（单文件 ≤ " + (maxBytes / 1024 / 1024) + " MB）"
+            : "文件超过上传限制";
+        log.warn("MaxUploadSize: max={} bytes msg={}", maxBytes, e.getMessage());
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+            .body(Result.error(ResultCode.VALIDATION_FAILED, hint));
     }
 
     @ExceptionHandler(Exception.class)
