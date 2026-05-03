@@ -11,22 +11,31 @@ import {
 import { useStores, useInvalidateStores } from "@/lib/queries/stores";
 import { useToast } from "@/components/ui/Toast";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
+import { useI18n } from "@/lib/i18n/context";
 
-const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
-  ACTIVE: { text: "正常", cls: "bg-emerald-100 text-emerald-900 border-emerald-300" },
-  DISABLED: { text: "已停用", cls: "bg-zinc-100 text-zinc-500 border-zinc-300" },
-  TOKEN_EXPIRED: { text: "Token 已过期", cls: "bg-amber-100 text-amber-900 border-amber-300" },
-  UNINSTALLED: { text: "已卸载", cls: "bg-rose-100 text-rose-900 border-rose-300" },
+const STATUS_CLS: Record<string, string> = {
+  ACTIVE: "bg-emerald-100 text-emerald-900 border-emerald-300",
+  DISABLED: "bg-zinc-100 text-zinc-500 border-zinc-300",
+  TOKEN_EXPIRED: "bg-amber-100 text-amber-900 border-amber-300",
+  UNINSTALLED: "bg-rose-100 text-rose-900 border-rose-300",
 };
 
 const SENSITIVE_DISABLE = "STORE_BATCH_DISABLE";
 
 export default function StoresPage() {
+  const { t } = useI18n();
   const toast = useToast();
   const { data, isPending, error } = useStores();
   const invalidateStores = useInvalidateStores();
   const stores: StoreItem[] = data ?? [];
   const errorMsg = error ? (error as Error).message : "";
+
+  const STATUS_TEXT: Record<string, string> = {
+    ACTIVE: t("stores.status.active"),
+    DISABLED: t("stores.status.disabled"),
+    TOKEN_EXPIRED: t("stores.status.tokenExpired"),
+    UNINSTALLED: t("stores.status.uninstalled"),
+  };
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -60,9 +69,13 @@ export default function StoresPage() {
     try {
       const r = await storeApi.healthCheck(id);
       if (r.ok) {
-        toast.success(`#${id} 店铺正常`);
+        toast.success(t("stores.healthOk").replace("{id}", String(id)));
       } else {
-        toast.error(`#${id} 异常：${r.message ?? "未知错误"}`);
+        toast.error(
+          t("stores.healthFail")
+            .replace("{id}", String(id))
+            .replace("{message}", r.message ?? t("stores.healthUnknown"))
+        );
       }
       invalidateStores();
     } finally {
@@ -72,7 +85,7 @@ export default function StoresPage() {
 
   async function onBatchPullAssets() {
     if (!ASSET_TRIGGER_AVAILABLE) {
-      toast.warn("后端尚未实现「触发资产快照」endpoint");
+      toast.warn(t("stores.assetsNotImpl"));
       return;
     }
     const ids = Array.from(selected);
@@ -89,11 +102,15 @@ export default function StoresPage() {
           failed++;
         } finally {
           done++;
-          toast.info(`${done}/${ids.length} 完成`);
+          toast.info(
+            t("stores.batchProgress")
+              .replace("{done}", String(done))
+              .replace("{total}", String(ids.length))
+          );
         }
       }
-      if (failed > 0) toast.error(`${failed} 个店铺失败`);
-      else toast.success("批量拉资产完成");
+      if (failed > 0) toast.error(t("stores.batchFailed").replace("{count}", String(failed)));
+      else toast.success(t("stores.batchPullDone"));
     } finally {
       setBusy(false);
     }
@@ -101,20 +118,20 @@ export default function StoresPage() {
 
   async function onBatchDisable() {
     if (!STORE_DISABLE_AVAILABLE) {
-      toast.warn("后端尚未实现 POST /store/{id}/disable endpoint");
+      toast.warn(t("stores.disableNotImpl"));
       return;
     }
     const ids = Array.from(selected);
     if (ids.length === 0) return;
-    if (!window.confirm(`确认禁用选中的 ${ids.length} 个店铺？此操作需钉钉 6 位码二次确认。`)) {
+    if (!window.confirm(t("stores.confirmDisable").replace("{count}", String(ids.length)))) {
       return;
     }
     setBusy(true);
     try {
       await storeApi.requestSensitiveCode(SENSITIVE_DISABLE);
-      const code = window.prompt("钉钉收到的 6 位验证码：");
+      const code = window.prompt(t("stores.dingCodePrompt"));
       if (!code) {
-        toast.info("已取消");
+        toast.info(t("stores.cancelled"));
         return;
       }
       const { sensitiveToken } = await storeApi.verifySensitive(SENSITIVE_DISABLE, code);
@@ -127,11 +144,15 @@ export default function StoresPage() {
           failed++;
         } finally {
           done++;
-          toast.info(`${done}/${ids.length} 完成`);
+          toast.info(
+            t("stores.batchProgress")
+              .replace("{done}", String(done))
+              .replace("{total}", String(ids.length))
+          );
         }
       }
-      if (failed > 0) toast.error(`${failed} 个店铺失败`);
-      else toast.success("批量禁用完成");
+      if (failed > 0) toast.error(t("stores.batchFailed").replace("{count}", String(failed)));
+      else toast.success(t("stores.batchDisableDone"));
       setSelected(new Set());
       invalidateStores();
     } catch (e) {
@@ -146,12 +167,12 @@ export default function StoresPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">店铺管理</h1>
+        <h1 className="text-2xl font-semibold">{t("stores.title")}</h1>
         <Link
           href="/stores/new"
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
         >
-          + 接入店铺
+          {t("stores.create")}
         </Link>
       </div>
 
@@ -163,7 +184,9 @@ export default function StoresPage() {
 
       <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
         <div className="text-muted-foreground">
-          {selectedCount > 0 ? `已选 ${selectedCount} 项` : "未选择"}
+          {selectedCount > 0
+            ? t("stores.selected").replace("{count}", String(selectedCount))
+            : t("stores.unselected")}
         </div>
         <DropdownMenu
           align="right"
@@ -173,7 +196,7 @@ export default function StoresPage() {
               disabled={selectedCount === 0 || busy}
               className="rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
-              批量操作 ▾
+              {t("stores.batchMenu")}
             </button>
           }
         >
@@ -181,9 +204,9 @@ export default function StoresPage() {
             disabled={!ASSET_TRIGGER_AVAILABLE || busy}
             onClick={onBatchPullAssets}
           >
-            批量拉资产
+            {t("stores.batch.pullAssets")}
             {!ASSET_TRIGGER_AVAILABLE && (
-              <span className="ml-1 text-[10px] text-muted-foreground">(待后端)</span>
+              <span className="ml-1 text-[10px] text-muted-foreground">{t("stores.pendingBackend")}</span>
             )}
           </DropdownItem>
           <DropdownItem
@@ -191,9 +214,9 @@ export default function StoresPage() {
             disabled={!STORE_DISABLE_AVAILABLE || busy}
             onClick={onBatchDisable}
           >
-            批量禁用
+            {t("stores.batch.disable")}
             {!STORE_DISABLE_AVAILABLE && (
-              <span className="ml-1 text-[10px] opacity-70">(待后端)</span>
+              <span className="ml-1 text-[10px] opacity-70">{t("stores.pendingBackend")}</span>
             )}
           </DropdownItem>
         </DropdownMenu>
@@ -211,27 +234,28 @@ export default function StoresPage() {
                     if (el) el.indeterminate = someSelected;
                   }}
                   onChange={toggleAll}
-                  aria-label="全选"
+                  aria-label={t("stores.selectAll")}
                 />
               </th>
-              <th className="px-3 py-2 text-left">ID</th>
-              <th className="px-3 py-2 text-left">店铺域名</th>
-              <th className="px-3 py-2 text-left">品牌名</th>
-              <th className="px-3 py-2 text-left">Token 类型</th>
-              <th className="px-3 py-2 text-left">状态</th>
-              <th className="px-3 py-2 text-left">接入时间</th>
-              <th className="px-3 py-2 text-right">操作</th>
+              <th className="px-3 py-2 text-left">{t("stores.column.id")}</th>
+              <th className="px-3 py-2 text-left">{t("stores.column.domain")}</th>
+              <th className="px-3 py-2 text-left">{t("stores.column.brand")}</th>
+              <th className="px-3 py-2 text-left">{t("stores.column.tokenType")}</th>
+              <th className="px-3 py-2 text-left">{t("stores.column.status")}</th>
+              <th className="px-3 py-2 text-left">{t("stores.column.created")}</th>
+              <th className="px-3 py-2 text-right">{t("stores.column.actions")}</th>
             </tr>
           </thead>
           <tbody>
             {isPending && (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">加载中...</td></tr>
+              <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">{t("common.loading")}</td></tr>
             )}
             {!isPending && stores.length === 0 && (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">暂无店铺，点右上角接入</td></tr>
+              <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">{t("stores.empty")}</td></tr>
             )}
             {stores.map((s) => {
-              const sl = STATUS_LABEL[s.status] ?? STATUS_LABEL.DISABLED;
+              const cls = STATUS_CLS[s.status] ?? STATUS_CLS.DISABLED;
+              const text = STATUS_TEXT[s.status] ?? STATUS_TEXT.DISABLED;
               const checked = selected.has(s.id);
               return (
                 <tr key={s.id} className={"border-t " + (checked ? "bg-blue-50/40" : "")}>
@@ -240,7 +264,7 @@ export default function StoresPage() {
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggleOne(s.id)}
-                      aria-label={`选择 ${s.myshopifyDomain}`}
+                      aria-label={t("stores.selectRow").replace("{domain}", s.myshopifyDomain)}
                     />
                   </td>
                   <td className="px-3 py-2">{s.id}</td>
@@ -250,8 +274,8 @@ export default function StoresPage() {
                     <span className="rounded border px-1.5 py-0.5 font-mono">{s.tokenType}</span>
                   </td>
                   <td className="px-3 py-2">
-                    <span className={"inline-block rounded border px-2 py-0.5 text-xs " + sl.cls}>
-                      {sl.text}
+                    <span className={"inline-block rounded border px-2 py-0.5 text-xs " + cls}>
+                      {text}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">
@@ -263,9 +287,9 @@ export default function StoresPage() {
                       disabled={!!healthChecking[s.id]}
                       onClick={() => onHealthCheck(s.id)}
                       className="rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
-                      title="健康检查（兜底：基于 list 状态判断）"
+                      title={t("stores.healthCheckTip")}
                     >
-                      {healthChecking[s.id] ? "检查中…" : "健康检查"}
+                      {healthChecking[s.id] ? t("stores.healthChecking") : t("stores.healthCheck")}
                     </button>
                   </td>
                 </tr>

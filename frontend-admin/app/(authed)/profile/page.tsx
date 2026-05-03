@@ -11,8 +11,10 @@ import {
   type NotificationEventDef,
   type NotificationSubscription,
 } from "@/lib/api/notification";
+import { useI18n } from "@/lib/i18n/context";
 
 export default function ProfilePage() {
+  const { t } = useI18n();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -43,17 +45,17 @@ export default function ProfilePage() {
     e.preventDefault();
     setPwdMsg("");
     if (newPwd !== confirmPwd) {
-      setPwdMsg("两次输入的新密码不一致");
+      setPwdMsg(t("profile.password.mismatch"));
       return;
     }
     if (newPwd.length < 8) {
-      setPwdMsg("新密码至少 8 位");
+      setPwdMsg(t("profile.password.tooShort"));
       return;
     }
     setPwdBusy(true);
     try {
       await userApi.changePassword(oldPwd, newPwd);
-      setPwdMsg("✓ 密码已修改");
+      setPwdMsg(t("profile.password.success"));
       setOldPwd("");
       setNewPwd("");
       setConfirmPwd("");
@@ -65,41 +67,48 @@ export default function ProfilePage() {
     }
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">加载中...</p>;
+  if (loading) return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
   if (error) return <p className="text-sm text-destructive">{error}</p>;
   if (!me) return null;
 
+  const successPrefix = t("profile.password.success");
   return (
     <div className="max-w-2xl space-y-6">
-      <h1 className="text-2xl font-semibold">个人中心</h1>
+      <h1 className="text-2xl font-semibold">{t("profile.title")}</h1>
 
       <section className="rounded-lg border bg-background p-5">
-        <h2 className="mb-3 text-base font-medium">基本信息</h2>
+        <h2 className="mb-3 text-base font-medium">{t("profile.basicInfo")}</h2>
         <dl className="space-y-2 text-sm">
-          <Row label="工号" value={me.employeeNo} />
-          <Row label="用户名" value={me.username} />
-          <Row label="邮箱" value={me.email || "-"} />
-          <Row label="账号类型" value={me.userType === "TEMP" ? "临时账号" : "正式员工"} />
-          <Row label="状态" value={me.status} />
+          <Row label={t("profile.field.employeeNo")} value={me.employeeNo} />
+          <Row label={t("profile.field.username")} value={me.username} />
+          <Row label={t("profile.field.email")} value={me.email || "-"} />
+          <Row
+            label={t("profile.field.userType")}
+            value={me.userType === "TEMP" ? t("profile.userType.temp") : t("profile.userType.full")}
+          />
+          <Row label={t("profile.field.status")} value={me.status} />
           {me.expiresAt && (
             <Row
-              label="账号有效期至"
+              label={t("profile.field.expiresAt")}
               value={new Date(me.expiresAt).toLocaleString("zh-CN")}
             />
           )}
-          <Row label="钉钉绑定" value={me.dingtalkUserId ? "已绑定" : "未绑定"} />
+          <Row
+            label={t("profile.field.dingtalkBound")}
+            value={me.dingtalkUserId ? t("profile.dingtalk.bound") : t("profile.dingtalk.unbound")}
+          />
         </dl>
         {me.passwordMustChange && (
           <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-            ⚠ 检测到您使用初始/临时密码，请立即在下方修改。
+            {t("profile.passwordMustChangeWarn")}
           </div>
         )}
       </section>
 
       <section className="rounded-lg border bg-background p-5">
-        <h2 className="mb-3 text-base font-medium">修改密码</h2>
+        <h2 className="mb-3 text-base font-medium">{t("profile.changePassword")}</h2>
         <form onSubmit={changePwd} className="space-y-4">
-          <Field label="原密码">
+          <Field label={t("profile.password.old")}>
             <input
               type="password"
               value={oldPwd}
@@ -108,7 +117,7 @@ export default function ProfilePage() {
               className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </Field>
-          <Field label="新密码（≥ 8 位）">
+          <Field label={t("profile.password.new")}>
             <input
               type="password"
               value={newPwd}
@@ -118,7 +127,7 @@ export default function ProfilePage() {
               className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </Field>
-          <Field label="确认新密码">
+          <Field label={t("profile.password.confirm")}>
             <input
               type="password"
               value={confirmPwd}
@@ -128,7 +137,7 @@ export default function ProfilePage() {
             />
           </Field>
           {pwdMsg && (
-            <p className={"text-sm " + (pwdMsg.startsWith("✓") ? "text-emerald-700" : "text-destructive")}>
+            <p className={"text-sm " + (pwdMsg === successPrefix ? "text-emerald-700" : "text-destructive")}>
               {pwdMsg}
             </p>
           )}
@@ -137,7 +146,7 @@ export default function ProfilePage() {
             disabled={pwdBusy}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
-            {pwdBusy ? "修改中..." : "确认修改"}
+            {pwdBusy ? t("profile.password.submitting") : t("profile.password.submit")}
           </button>
         </form>
       </section>
@@ -148,6 +157,7 @@ export default function ProfilePage() {
 }
 
 function SubscriptionSection() {
+  const { t } = useI18n();
   const [events, setEvents] = useState<Record<string, NotificationEventDef[]>>({});
   const [subs, setSubs] = useState<Record<string, NotificationSubscription>>({});
   const [loading, setLoading] = useState(true);
@@ -201,7 +211,7 @@ function SubscriptionSection() {
     setMsg("");
     try {
       await notificationApi.updateMySubscriptions(Object.values(subs));
-      setMsg("✓ 订阅已保存");
+      setMsg(t("profile.subscriptions.saved"));
     } catch (e) {
       setMsg((e as ApiError).message);
     } finally {
@@ -212,37 +222,38 @@ function SubscriptionSection() {
   if (loading) {
     return (
       <section className="rounded-lg border bg-background p-5">
-        <h2 className="mb-3 text-base font-medium">通知订阅</h2>
-        <p className="text-xs text-muted-foreground">加载中...</p>
+        <h2 className="mb-3 text-base font-medium">{t("profile.subscriptions")}</h2>
+        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
       </section>
     );
   }
 
+  const savedMsg = t("profile.subscriptions.saved");
   const cats = Object.keys(events);
   return (
     <section className="rounded-lg border bg-background p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-base font-medium">通知订阅</h2>
+        <h2 className="text-base font-medium">{t("profile.subscriptions")}</h2>
         <button
           onClick={save}
           disabled={busy}
           className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
         >
-          {busy ? "保存中..." : "保存"}
+          {busy ? t("profile.subscriptions.saving") : t("profile.subscriptions.save")}
         </button>
       </div>
       {msg && (
         <p
           className={
             "mb-3 text-xs " +
-            (msg.startsWith("✓") ? "text-emerald-700" : "text-destructive")
+            (msg === savedMsg ? "text-emerald-700" : "text-destructive")
           }
         >
           {msg}
         </p>
       )}
       <p className="mb-4 text-xs text-muted-foreground">
-        勾选事件下要接收的通道；取消「启用」整事件不再发送（含所有通道）。
+        {t("profile.subscriptions.hint")}
       </p>
       <div className="space-y-4">
         {cats.map((cat) => (
@@ -250,14 +261,14 @@ function SubscriptionSection() {
             <summary className="cursor-pointer bg-muted/30 px-3 py-2 text-sm font-medium">
               {CATEGORY_LABEL[cat] ?? cat}
               <span className="ml-2 text-xs text-muted-foreground">
-                {events[cat].length} 个事件
+                {t("profile.subscriptions.eventCount").replace("{count}", String(events[cat].length))}
               </span>
             </summary>
             <table className="w-full text-xs">
               <thead className="text-left text-muted-foreground">
                 <tr>
-                  <th className="px-3 py-2 font-medium">事件</th>
-                  <th className="px-2 py-2 text-center font-medium">启用</th>
+                  <th className="px-3 py-2 font-medium">{t("profile.subscriptions.col.event")}</th>
+                  <th className="px-2 py-2 text-center font-medium">{t("profile.subscriptions.col.enabled")}</th>
                   {CHANNELS.map((c) => (
                     <th key={c} className="px-2 py-2 text-center font-medium">
                       {CHANNEL_LABEL[c]}

@@ -5,23 +5,42 @@ import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, EmptyState, ErrorBanner } from "@/components/ui/StatusBlocks";
 import { inboxApi, type InappMessage } from "@/lib/api/inbox";
 import type { ApiError } from "@/lib/api/client";
+import { useI18n } from "@/lib/i18n/context";
+import type { MessageKey } from "@/lib/i18n/messages";
 
 const PAGE_SIZE = 20;
 
-const CATEGORIES = ["全部", "邀请", "店铺", "推送", "审批", "运维", "系统"] as const;
+const CATEGORIES = ["all", "invitation", "store", "push", "approval", "ops", "system"] as const;
 type Category = (typeof CATEGORIES)[number];
 
-function categoryOf(eventCode: string): string {
-  if (eventCode.startsWith("INVITATION_")) return "邀请";
-  if (eventCode.includes("NEW_STORE") || eventCode.includes("TOKEN_") || eventCode === "STAFF_FROZEN") return "店铺";
-  if (eventCode.includes("PUSH")) return "推送";
-  if (eventCode.startsWith("APPROVAL_") || eventCode.startsWith("CROSS_AUTH_")) return "审批";
-  if (eventCode === "BACKUP_FAIL" || eventCode === "HIGH_RISK_OP") return "运维";
-  return "系统";
+const CATEGORY_LABEL_KEY: Record<Category, MessageKey> = {
+  all: "inbox.category.all",
+  invitation: "inbox.category.invitation",
+  store: "inbox.category.store",
+  push: "inbox.category.push",
+  approval: "inbox.category.approval",
+  ops: "inbox.category.ops",
+  system: "inbox.category.system",
+};
+
+function categoryOf(eventCode: string): Exclude<Category, "all"> {
+  if (eventCode.startsWith("INVITATION_")) return "invitation";
+  if (eventCode.includes("NEW_STORE") || eventCode.includes("TOKEN_") || eventCode === "STAFF_FROZEN") return "store";
+  if (eventCode.includes("PUSH")) return "push";
+  if (eventCode.startsWith("APPROVAL_") || eventCode.startsWith("CROSS_AUTH_")) return "approval";
+  if (eventCode === "BACKUP_FAIL" || eventCode === "HIGH_RISK_OP") return "ops";
+  return "system";
 }
 
-const GROUP_KEYS = ["今天", "昨天", "本周", "更早"] as const;
+const GROUP_KEYS = ["today", "yesterday", "thisWeek", "earlier"] as const;
 type GroupKey = (typeof GROUP_KEYS)[number];
+
+const GROUP_LABEL_KEY: Record<GroupKey, MessageKey> = {
+  today: "inbox.timeGroup.today",
+  yesterday: "inbox.timeGroup.yesterday",
+  thisWeek: "inbox.timeGroup.thisWeek",
+  earlier: "inbox.timeGroup.earlier",
+};
 
 function groupByTime(items: InappMessage[]): Record<GroupKey, InappMessage[]> {
   const today = new Date();
@@ -30,13 +49,13 @@ function groupByTime(items: InappMessage[]): Record<GroupKey, InappMessage[]> {
   yesterday.setDate(today.getDate() - 1);
   const weekStart = new Date(today);
   weekStart.setDate(today.getDate() - today.getDay());
-  const groups: Record<GroupKey, InappMessage[]> = { 今天: [], 昨天: [], 本周: [], 更早: [] };
+  const groups: Record<GroupKey, InappMessage[]> = { today: [], yesterday: [], thisWeek: [], earlier: [] };
   for (const m of items) {
     const t = new Date(m.createdAt);
-    if (t >= today) groups.今天.push(m);
-    else if (t >= yesterday) groups.昨天.push(m);
-    else if (t >= weekStart) groups.本周.push(m);
-    else groups.更早.push(m);
+    if (t >= today) groups.today.push(m);
+    else if (t >= yesterday) groups.yesterday.push(m);
+    else if (t >= weekStart) groups.thisWeek.push(m);
+    else groups.earlier.push(m);
   }
   for (const k of GROUP_KEYS) {
     groups[k].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
@@ -45,9 +64,10 @@ function groupByTime(items: InappMessage[]): Record<GroupKey, InappMessage[]> {
 }
 
 export default function InboxPage() {
+  const { t } = useI18n();
   const toast = useToast();
   const [tab, setTab] = useState<"all" | "unread">("all");
-  const [category, setCategory] = useState<Category>("全部");
+  const [category, setCategory] = useState<Category>("all");
   const [items, setItems] = useState<InappMessage[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -100,7 +120,7 @@ export default function InboxPage() {
   async function handleMarkAllRead() {
     try {
       const r = await inboxApi.markAllRead();
-      toast.success(`已标记 ${r.updated} 条为已读`);
+      toast.success(t("inbox.markAllReadDone").replace("{count}", String(r.updated)));
       load();
     } catch {
       /* */
@@ -117,7 +137,7 @@ export default function InboxPage() {
   }
 
   const filtered = useMemo(
-    () => (category === "全部" ? items : items.filter((m) => categoryOf(m.eventCode) === category)),
+    () => (category === "all" ? items : items.filter((m) => categoryOf(m.eventCode) === category)),
     [items, category]
   );
   const grouped = useMemo(() => groupByTime(filtered), [filtered]);
@@ -128,21 +148,21 @@ export default function InboxPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">通知中心</h1>
+          <h1 className="text-2xl font-semibold">{t("inbox.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            站内信收件箱。系统事件 / 钉钉同步 / 跨公司授权等通知会落到这里。
+            {t("inbox.description")}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-900">
-            未读 {unread}
+            {t("inbox.unreadCount").replace("{count}", String(unread))}
           </span>
           <button
             onClick={handleMarkAllRead}
             disabled={unread === 0}
             className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
           >
-            全部标已读
+            {t("inbox.markAllRead")}
           </button>
         </div>
       </div>
@@ -162,12 +182,12 @@ export default function InboxPage() {
                   (tab === k ? "border-primary bg-primary text-primary-foreground" : "")
                 }
               >
-                {k === "all" ? "全部" : "未读"}
+                {k === "all" ? t("inbox.tab.all") : t("inbox.tab.unread")}
               </button>
             ))}
           </div>
           <div className="flex items-center gap-1.5 text-sm">
-            <label className="text-xs text-muted-foreground">分类</label>
+            <label className="text-xs text-muted-foreground">{t("inbox.filterCategory")}</label>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value as Category)}
@@ -175,13 +195,13 @@ export default function InboxPage() {
             >
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {t(CATEGORY_LABEL_KEY[c])}
                 </option>
               ))}
             </select>
           </div>
         </div>
-        <div className="text-xs text-muted-foreground">共 {total} 条</div>
+        <div className="text-xs text-muted-foreground">{t("inbox.totalCount").replace("{count}", String(total))}</div>
       </div>
 
       <ErrorBanner message={error} onRetry={load} />
@@ -190,13 +210,13 @@ export default function InboxPage() {
         {loading && <LoadingBlock />}
         {!loading && filtered.length === 0 && (
           <EmptyState
-            title="暂无通知"
+            title={t("inbox.empty.title")}
             hint={
               tab === "unread"
-                ? "全部已读"
-                : category !== "全部"
-                ? `当前分类「${category}」无消息`
-                : "等待系统事件"
+                ? t("inbox.empty.unread")
+                : category !== "all"
+                ? t("inbox.empty.category").replace("{name}", t(CATEGORY_LABEL_KEY[category]))
+                : t("inbox.empty.waiting")
             }
           />
         )}
@@ -208,7 +228,9 @@ export default function InboxPage() {
             return (
               <section key={gk} className="space-y-2">
                 <div className="px-1 text-xs text-muted-foreground">
-                  {gk} ({list.length} 条)
+                  {t("inbox.groupCount")
+                    .replace("{name}", t(GROUP_LABEL_KEY[gk]))
+                    .replace("{count}", String(list.length))}
                 </div>
                 {list.map((m) => {
                   const isUnread = !m.readAt;
@@ -272,7 +294,7 @@ export default function InboxPage() {
                                 onClick={() => followLink(m.linkUrl)}
                                 className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
                               >
-                                查看详情 →
+                                {t("inbox.linkOpen")}
                               </button>
                             </div>
                           )}
@@ -293,7 +315,7 @@ export default function InboxPage() {
             onClick={() => setPage((p) => p - 1)}
             className="rounded-md border px-3 py-1.5 hover:bg-accent disabled:opacity-50"
           >
-            上一页
+            {t("common.prev")}
           </button>
           <span className="text-muted-foreground">
             {page} / {totalPages}
@@ -303,7 +325,7 @@ export default function InboxPage() {
             onClick={() => setPage((p) => p + 1)}
             className="rounded-md border px-3 py-1.5 hover:bg-accent disabled:opacity-50"
           >
-            下一页
+            {t("common.next")}
           </button>
         </div>
       )}

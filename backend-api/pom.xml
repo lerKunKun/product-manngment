@@ -155,6 +155,14 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- T37: WireMock for ShopifyApiClient HTTP mocking -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.10.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -183,6 +191,34 @@
                     <locations>
                         <location>filesystem:src/main/resources/db/migration</location>
                     </locations>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <excludes>
+                        <exclude>**/Application.class</exclude>
+                        <exclude>**/entity/**</exclude>
+                        <exclude>**/dto/**</exclude>
+                        <exclude>**/config/**</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
         </plugins>

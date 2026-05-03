@@ -7,9 +7,9 @@ import { Badge } from "@/components/ui/Badge";
 import { Dialog } from "@/components/ui/Dialog";
 import { orgApi, type OrgTreeNode, type SysOrg } from "@/lib/api/org";
 import type { ApiError } from "@/lib/api/client";
+import { useI18n } from "@/lib/i18n/context";
 
 const SENSITIVE_ACTION = "ORG_DELETE";
-const DING_TIP = "钉钉同步部门，请先在钉钉调整";
 
 function isDingSynced(node: { dingtalkDeptId?: number | string | null }) {
   const v = node.dingtalkDeptId;
@@ -36,7 +36,9 @@ function findById(nodes: OrgTreeNode[] | undefined, id: number): OrgTreeNode | n
 }
 
 export default function OrgsPage() {
+  const { t } = useI18n();
   const toast = useToast();
+  const DING_TIP = t("orgs.dingTip");
   const [tree, setTree] = useState<OrgTreeNode[]>([]);
   const [list, setList] = useState<SysOrg[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,7 +113,7 @@ export default function OrgsPage() {
 
   async function submitCreate() {
     if (!createName.trim()) {
-      toast.warn("请输入名称");
+      toast.warn(t("orgs.nameRequired"));
       return;
     }
     setCreateSubmitting(true);
@@ -121,7 +123,7 @@ export default function OrgsPage() {
         name: createName.trim(),
         code: createCode.trim() || undefined,
       });
-      toast.success("已创建");
+      toast.success(t("orgs.created"));
       setCreateOpen(false);
       load();
     } catch {
@@ -135,7 +137,7 @@ export default function OrgsPage() {
     if (!selectedNode) return;
     const v = renameValue.trim();
     if (!v) {
-      toast.warn("名称不能为空");
+      toast.warn(t("orgs.nameEmpty"));
       return;
     }
     if (v === selectedNode.name) {
@@ -144,7 +146,7 @@ export default function OrgsPage() {
     }
     try {
       await orgApi.update(selectedNode.id, { name: v });
-      toast.success("已保存");
+      toast.success(t("orgs.saved"));
       setRenaming(false);
       load();
     } catch {
@@ -154,19 +156,17 @@ export default function OrgsPage() {
 
   async function doDelete() {
     if (!selectedNode) return;
-    if (!confirm(`删除组织「${selectedNode.name}」？需要钉钉验证码二次确认。`)) return;
+    if (!confirm(t("orgs.confirmDelete").replace("{name}", selectedNode.name))) return;
     try {
       await orgApi.requestSensitiveCode(SENSITIVE_ACTION);
-      const code = window.prompt(
-        "钉钉收到的 6 位验证码（钉钉未配 dingtalk_userid 时看 backend 日志）："
-      );
+      const code = window.prompt(t("orgs.dingCodePrompt"));
       if (!code) {
-        toast.info("已取消");
+        toast.info(t("orgs.cancelled"));
         return;
       }
       const { sensitiveToken } = await orgApi.verifySensitive(SENSITIVE_ACTION, code);
       await orgApi.remove(selectedNode.id, sensitiveToken);
-      toast.success("已删除");
+      toast.success(t("orgs.deleted"));
       setSelectedId(null);
       load(false);
     } catch {
@@ -177,9 +177,9 @@ export default function OrgsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold">组织架构</h1>
+        <h1 className="text-2xl font-semibold">{t("orgs.title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          维护公司 / 部门层级；钉钉同步部门请在钉钉源端编辑。
+          {t("orgs.description")}
         </p>
       </div>
 
@@ -194,26 +194,26 @@ export default function OrgsPage() {
                 onClick={expandAll}
                 className="rounded border px-2 py-1 text-xs hover:bg-accent"
               >
-                展开全部
+                {t("orgs.expandAll")}
               </button>
               <button
                 onClick={collapseAll}
                 className="rounded border px-2 py-1 text-xs hover:bg-accent"
               >
-                折叠全部
+                {t("orgs.collapseAll")}
               </button>
             </div>
             <button
               onClick={() => openCreate(null)}
               className="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
             >
-              + 新建顶级
+              {t("orgs.createTopLevel")}
             </button>
           </div>
           <div className="max-h-[700px] overflow-auto p-1">
             {loading && <LoadingBlock />}
             {!loading && tree.length === 0 && (
-              <EmptyState title="暂无组织" hint="点击右上角新建顶级" />
+              <EmptyState title={t("orgs.empty")} hint={t("orgs.emptyHint")} />
             )}
             {!loading && tree.length > 0 && (
               <ul className="space-y-0.5">
@@ -240,17 +240,17 @@ export default function OrgsPage() {
         {/* 右侧 详情 */}
         <section className="min-w-0 flex-1 rounded-lg border bg-background p-4">
           {!selectedNode && (
-            <EmptyState title="选中左侧节点查看详情" />
+            <EmptyState title={t("orgs.selectNodeHint")} />
           )}
           {selectedNode && (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold">组织详情</h2>
+                  <h2 className="text-lg font-semibold">{t("orgs.detail")}</h2>
                   {!renaming && (
                     <span className="text-base text-foreground">— {selectedNode.name}</span>
                   )}
-                  {selectedDingSynced && <Badge variant="info">钉钉同步</Badge>}
+                  {selectedDingSynced && <Badge variant="info">{t("orgs.dingSynced")}</Badge>}
                 </div>
                 <div className="flex gap-2">
                   {!renaming && (
@@ -263,7 +263,7 @@ export default function OrgsPage() {
                       title={selectedDingSynced ? DING_TIP : undefined}
                       className="rounded border px-3 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      重命名
+                      {t("orgs.rename")}
                     </button>
                   )}
                   <button
@@ -272,7 +272,7 @@ export default function OrgsPage() {
                     title={selectedDingSynced ? DING_TIP : undefined}
                     className="rounded border px-3 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    + 新建子部门
+                    {t("orgs.createChild")}
                   </button>
                   <button
                     onClick={doDelete}
@@ -280,7 +280,7 @@ export default function OrgsPage() {
                     title={selectedDingSynced ? DING_TIP : undefined}
                     className="rounded border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-900 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    删除
+                    {t("common.delete")}
                   </button>
                 </div>
               </div>
@@ -297,13 +297,13 @@ export default function OrgsPage() {
                     onClick={submitRename}
                     className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
                   >
-                    保存
+                    {t("common.save")}
                   </button>
                   <button
                     onClick={() => setRenaming(false)}
                     className="rounded border px-3 py-1.5 text-xs hover:bg-accent"
                   >
-                    取消
+                    {t("common.cancel")}
                   </button>
                 </div>
               )}
@@ -345,7 +345,7 @@ export default function OrgsPage() {
       <Dialog
         open={createOpen}
         onClose={() => (createSubmitting ? undefined : setCreateOpen(false))}
-        title={createParentId === null ? "新建顶级组织" : "新建子部门"}
+        title={createParentId === null ? t("orgs.dialog.createTop") : t("orgs.dialog.createChild")}
         footer={
           <>
             <button
@@ -353,25 +353,27 @@ export default function OrgsPage() {
               disabled={createSubmitting}
               className="rounded border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
             >
-              取消
+              {t("common.cancel")}
             </button>
             <button
               onClick={submitCreate}
               disabled={createSubmitting}
               className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             >
-              {createSubmitting ? "提交中…" : "确定"}
+              {createSubmitting ? t("orgs.dialog.submitting") : t("orgs.dialog.confirm")}
             </button>
           </>
         }
       >
         {createParentId !== null && (
           <div className="text-xs text-muted-foreground">
-            父节点：#{createParentId} {findById(tree, createParentId)?.name ?? ""}
+            {t("orgs.dialog.parent")
+              .replace("{id}", String(createParentId))
+              .replace("{name}", findById(tree, createParentId)?.name ?? "")}
           </div>
         )}
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">名称 *</label>
+          <label className="mb-1 block text-xs text-muted-foreground">{t("orgs.dialog.name")}</label>
           <input
             autoFocus
             value={createName}
@@ -380,7 +382,7 @@ export default function OrgsPage() {
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">code（可选）</label>
+          <label className="mb-1 block text-xs text-muted-foreground">{t("orgs.dialog.code")}</label>
           <input
             value={createCode}
             onChange={(e) => setCreateCode(e.target.value)}
@@ -428,6 +430,7 @@ function TreeNode({
   onSelect: (id: number) => void;
   onCreateChild: (parentId: number) => void;
 }) {
+  const { t } = useI18n();
   const hasChildren = !!node.children?.length;
   const isOpen = expanded.has(node.id);
   const isSel = selectedId === node.id;
@@ -445,7 +448,7 @@ function TreeNode({
           <button
             onClick={() => onToggle(node.id)}
             className="inline-flex h-4 w-4 items-center justify-center text-xs text-muted-foreground hover:text-foreground"
-            aria-label={isOpen ? "折叠子部门" : "展开子部门"}
+            aria-label={isOpen ? t("orgs.tree.collapseChildren") : t("orgs.tree.expandChildren")}
           >
             {isOpen ? "▾" : "▸"}
           </button>
@@ -459,7 +462,7 @@ function TreeNode({
         >
           <span className="truncate">{node.name}</span>
           {synced && (
-            <span className="text-[11px] text-muted-foreground" title="钉钉同步">
+            <span className="text-[11px] text-muted-foreground" title={t("orgs.tree.dingSyncTooltip")}>
               🔗
             </span>
           )}
@@ -468,8 +471,8 @@ function TreeNode({
           <button
             onClick={() => onCreateChild(node.id)}
             className="hidden rounded px-1 text-[11px] text-muted-foreground hover:bg-background hover:text-foreground group-hover:inline"
-            title="新建子部门"
-            aria-label="新建子部门"
+            title={t("orgs.tree.createChildLabel")}
+            aria-label={t("orgs.tree.createChildLabel")}
           >
             +
           </button>

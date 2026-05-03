@@ -167,6 +167,22 @@ colima start --cpu 4 --memory 8 --disk 60
 
 ---
 
+## 测试覆盖率
+
+跑后端测试 + 生成 jacoco HTML 报告：
+
+```bash
+cd backend-api && mvn test
+open target/site/jacoco/index.html
+```
+
+CI 自动跑测试 + 上传 jacoco artifact 30 天保留。
+
+**当前覆盖**：~31 case 横跨 Approval / Inapp / NotificationLog / SysAuditLog / SysRole / BackupNotify。
+**v1.0 目标**：60% 行覆盖率。
+
+---
+
 ## 安全审计
 
 ### 依赖审计（每月跑一次）

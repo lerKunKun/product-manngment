@@ -68,6 +68,13 @@ jobs:
           MYSQL_PASSWORD: root
           REDIS_HOST: 127.0.0.1
           MQ_HOST: 127.0.0.1
+      - name: Upload jacoco report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: backend-api/target/site/jacoco/
+          retention-days: 30
 
   worker:
     name: Worker (FastAPI)

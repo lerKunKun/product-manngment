@@ -31,10 +31,14 @@ public class ShopifyApiClient {
     @Value("${SHOPIFY_API_VERSION:2024-10}")
     private String apiVersion;
 
+    /** T37: 注入 base URL 前缀（默认 https://），test profile 用 http:// 让 WireMock 拦截。 */
+    @Value("${shopify.api-base-url:https://}")
+    private String apiBaseUrl;
+
     /** 调 /admin/api/{ver}/shop.json 验证 token 是否有效 + 返回 shop 基本信息。 */
     public ShopInfo verifyToken(String myshopifyDomain, String accessToken) {
         try {
-            String url = "https://" + myshopifyDomain + "/admin/api/" + apiVersion + "/shop.json";
+            String url = apiBaseUrl + myshopifyDomain + "/admin/api/" + apiVersion + "/shop.json";
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                 .header("X-Shopify-Access-Token", accessToken)
                 .timeout(Duration.ofSeconds(10))
@@ -60,7 +64,7 @@ public class ShopifyApiClient {
      */
     public ShopDetail fetchShopDetail(String myshopifyDomain, String accessToken) {
         try {
-            String url = "https://" + myshopifyDomain + "/admin/api/" + apiVersion + "/shop.json";
+            String url = apiBaseUrl + myshopifyDomain + "/admin/api/" + apiVersion + "/shop.json";
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                 .header("X-Shopify-Access-Token", accessToken)
                 .timeout(Duration.ofSeconds(8))
@@ -84,7 +88,7 @@ public class ShopifyApiClient {
     /** OAuth code → access_token */
     public TokenExchangeResult exchangeCode(String shop, String code, String apiKey, String apiSecret) {
         try {
-            String url = "https://" + shop + "/admin/oauth/access_token";
+            String url = apiBaseUrl + shop + "/admin/oauth/access_token";
             String body = String.format(
                 "{\"client_id\":\"%s\",\"client_secret\":\"%s\",\"code\":\"%s\"}",
                 apiKey, apiSecret, code
