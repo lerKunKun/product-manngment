@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/auth/sensitive")
 public class SensitiveOpController {
 
     private final SensitiveOpService service;
@@ -17,14 +16,27 @@ public class SensitiveOpController {
         this.service = service;
     }
 
-    @PostMapping("/request")
+    @PostMapping("/auth/sensitive/request")
     public Result<Void> request(@RequestBody RequestCodePayload body) {
         service.requestCode(CurrentUser.userIdOrThrow(), body.action);
         return Result.ok();
     }
 
-    @PostMapping("/verify")
+    @PostMapping("/auth/sensitive/verify")
     public Result<Map<String, String>> verify(@RequestBody VerifyPayload body) {
+        String token = service.verify(CurrentUser.userIdOrThrow(), body.action, body.code);
+        return Result.ok(Map.of("sensitiveToken", token, "ttl", "5m"));
+    }
+
+    /** F4 别名路径（与文档 /auth/sensitive-code/* 对齐）。 */
+    @PostMapping("/auth/sensitive-code/send")
+    public Result<Void> sendCode(@RequestBody RequestCodePayload body) {
+        service.requestCode(CurrentUser.userIdOrThrow(), body.action);
+        return Result.ok();
+    }
+
+    @PostMapping("/auth/sensitive-code/verify")
+    public Result<Map<String, String>> verifyCode(@RequestBody VerifyPayload body) {
         String token = service.verify(CurrentUser.userIdOrThrow(), body.action, body.code);
         return Result.ok(Map.of("sensitiveToken", token, "ttl", "5m"));
     }

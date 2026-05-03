@@ -48,4 +48,14 @@ export const authApi = {
     api.get<{ oauthUrl: string; state: string }>(
       `/auth/dingtalk/qrcode${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`
     ),
+
+  /** F4：发送敏感操作钉钉验证码（按当前用户的钉钉配置发） */
+  sendSensitiveCode: (action: string) =>
+    api.post<void>("/auth/sensitive-code/send", { action }),
+  /** F4：核对验证码 → 拿到一次性 sensitiveToken（5min 有效） */
+  verifySensitiveCode: (action: string, code: string) =>
+    api.post<{ sensitiveToken: string; ttl: string }>(
+      "/auth/sensitive-code/verify",
+      { action, code }
+    ),
 };

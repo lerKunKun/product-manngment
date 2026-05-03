@@ -5,9 +5,16 @@ import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, EmptyState, ErrorBanner } from "@/components/ui/StatusBlocks";
 import { Badge } from "@/components/ui/Badge";
 import { Dialog } from "@/components/ui/Dialog";
-import { orgApi, type OrgTreeNode, type SysOrg } from "@/lib/api/org";
+import {
+  orgApi,
+  type OrgTreeNode,
+  type SysOrg,
+  type DingtalkConfigView,
+  type DingtalkConfigInput,
+} from "@/lib/api/org";
 import type { ApiError } from "@/lib/api/client";
 import { useI18n } from "@/lib/i18n/context";
+import { Spinner } from "@/components/ui/StatusBlocks";
 
 const SENSITIVE_ACTION = "ORG_DELETE";
 
@@ -53,6 +60,20 @@ export default function OrgsPage() {
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createParentId, setCreateParentId] = useState<number | null>(null);
 
+  // F1：钉钉配置 + F3：立即同步
+  const [dingCfg, setDingCfg] = useState<DingtalkConfigView | null>(null);
+  const [dingCfgLoading, setDingCfgLoading] = useState(false);
+  const [dingCfgForm, setDingCfgForm] = useState<DingtalkConfigInput>({
+    corpId: "",
+    appKey: "",
+    appSecret: "",
+    agentId: "",
+    eventToken: "",
+    eventAesKey: "",
+  });
+  const [dingCfgSaving, setDingCfgSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
   async function load(keepSelected = true) {
     setLoading(true);
     setError("");
@@ -88,6 +109,97 @@ export default function OrgsPage() {
   const selectedDingSynced = selectedNode
     ? isDingSynced(selectedNode) || isDingSynced(selectedDetail ?? {})
     : false;
+  const selectedIsCompany =
+    (selectedDetail?.type ?? selectedNode?.type ?? "").toUpperCase() === "COMPANY";
+
+  // 切换选中 COMPANY 节点 → 拉钉钉配置
+  useEffect(() => {
+    if (!selectedId || !selectedIsCompany) {
+      setDingCfg(null);
+      setDingCfgForm({
+        corpId: "",
+        appKey: "",
+        appSecret: "",
+        agentId: "",
+        eventToken: "",
+        eventAesKey: "",
+      });
+      return;
+    }
+    setDingCfgLoading(true);
+    orgApi
+      .getDingtalkConfig(selectedId)
+      .then((c) => {
+        setDingCfg(c);
+        setDingCfgForm({
+          corpId: c?.corpId ?? "",
+          appKey: c?.appKey ?? "",
+          appSecret: "", // 永远不回填明文
+          agentId: c?.agentId ?? "",
+          eventToken: c?.eventToken ?? "",
+          eventAesKey: c?.eventAesKey ?? "",
+        });
+      })
+      .catch(() => {
+        /* 全局 toast */
+      })
+      .finally(() => setDingCfgLoading(false));
+  }, [selectedId, selectedIsCompany]);
+
+  async function saveDingtalkConfig() {
+    if (!selectedId) return;
+    if (!dingCfgForm.corpId.trim() || !dingCfgForm.appKey.trim() || !dingCfgForm.agentId.trim()) {
+      toast.warn(t("org.dingtalk.requiredHint"));
+      return;
+    }
+    if (!dingCfg?.configured && !dingCfgForm.appSecret?.trim()) {
+      toast.warn(t("org.dingtalk.secretRequiredFirst"));
+      return;
+    }
+    setDingCfgSaving(true);
+    try {
+      // 不传 appSecret 时表示不更新；传了空串去掉
+      const payload: DingtalkConfigInput = {
+        corpId: dingCfgForm.corpId.trim(),
+        appKey: dingCfgForm.appKey.trim(),
+        agentId: dingCfgForm.agentId.trim(),
+        eventToken: dingCfgForm.eventToken?.trim() || undefined,
+        eventAesKey: dingCfgForm.eventAesKey?.trim() || undefined,
+      };
+      if (dingCfgForm.appSecret && dingCfgForm.appSecret.trim()) {
+        payload.appSecret = dingCfgForm.appSecret.trim();
+      }
+      await orgApi.saveDingtalkConfig(selectedId, payload);
+      toast.success(t("org.dingtalk.saved"));
+      // 刷新（清空 secret 输入）
+      const refreshed = await orgApi.getDingtalkConfig(selectedId);
+      setDingCfg(refreshed);
+      setDingCfgForm((p) => ({ ...p, appSecret: "" }));
+    } catch {
+      /* 全局 toast */
+    } finally {
+      setDingCfgSaving(false);
+    }
+  }
+
+  async function triggerSync() {
+    if (!selectedId) return;
+    setSyncing(true);
+    try {
+      const r = await orgApi.triggerSync(selectedId);
+      toast.success(
+        t("org.dingtalk.syncResult")
+          .replace("{added}", String(r.added))
+          .replace("{skipped}", String(r.skipped))
+          .replace("{failed}", String(r.failed))
+      );
+      load(); // 同步后刷新组织树
+    } catch {
+      /* 全局 toast */
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   function expandAll() {
     setExpanded(new Set(collectIds(tree)));
@@ -337,6 +449,85 @@ export default function OrgsPage() {
                 />
                 <Field label="status" value={selectedDetail?.status ?? "—"} />
               </div>
+
+              {/* F1 + F3：仅 COMPANY 节点可见 */}
+              {selectedIsCompany && (
+                <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">{t("org.dingtalk.title")}</h3>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {dingCfg?.configured
+                          ? t("org.dingtalk.statusConfigured")
+                          : t("org.dingtalk.statusUnconfigured")}
+                      </span>
+                      <button
+                        onClick={triggerSync}
+                        disabled={syncing || !dingCfg?.configured}
+                        className="inline-flex items-center gap-1 rounded border px-3 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                        title={!dingCfg?.configured ? t("org.dingtalk.syncDisabledHint") : undefined}
+                      >
+                        {syncing && <Spinner />}
+                        {t("org.dingtalk.syncNow")}
+                      </button>
+                    </div>
+                  </div>
+                  {dingCfgLoading ? (
+                    <div className="text-xs text-muted-foreground">{t("common.loading")}</div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <CfgInput
+                        label={t("org.dingtalk.corpId")}
+                        value={dingCfgForm.corpId}
+                        onChange={(v) => setDingCfgForm((p) => ({ ...p, corpId: v }))}
+                      />
+                      <CfgInput
+                        label={t("org.dingtalk.agentId")}
+                        value={dingCfgForm.agentId}
+                        onChange={(v) => setDingCfgForm((p) => ({ ...p, agentId: v }))}
+                      />
+                      <CfgInput
+                        label={t("org.dingtalk.appKey")}
+                        value={dingCfgForm.appKey}
+                        onChange={(v) => setDingCfgForm((p) => ({ ...p, appKey: v }))}
+                      />
+                      <CfgInput
+                        label={t("org.dingtalk.appSecret")}
+                        value={dingCfgForm.appSecret ?? ""}
+                        onChange={(v) => setDingCfgForm((p) => ({ ...p, appSecret: v }))}
+                        placeholder={
+                          dingCfg?.configured
+                            ? t("org.dingtalk.secretKeepEmpty")
+                            : t("org.dingtalk.secretFirstTime")
+                        }
+                        type="password"
+                      />
+                      <CfgInput
+                        label={t("org.dingtalk.eventToken")}
+                        value={dingCfgForm.eventToken ?? ""}
+                        onChange={(v) => setDingCfgForm((p) => ({ ...p, eventToken: v }))}
+                        placeholder={t("org.dingtalk.optional")}
+                      />
+                      <CfgInput
+                        label={t("org.dingtalk.eventAesKey")}
+                        value={dingCfgForm.eventAesKey ?? ""}
+                        onChange={(v) => setDingCfgForm((p) => ({ ...p, eventAesKey: v }))}
+                        placeholder={t("org.dingtalk.optional")}
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <button
+                      onClick={saveDingtalkConfig}
+                      disabled={dingCfgSaving}
+                      className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                    >
+                      {dingCfgSaving && <Spinner />}
+                      {t("org.dingtalk.saveConfig")}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -409,6 +600,33 @@ function Field({
       <div className={"mt-0.5 break-all text-sm " + (mono ? "font-mono" : "")}>
         {value}
       </div>
+    </div>
+  );
+}
+
+function CfgInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  type?: "text" | "password";
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs text-muted-foreground">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+      />
     </div>
   );
 }

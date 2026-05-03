@@ -63,6 +63,7 @@ function getNavGroups(t: (k: MessageKey) => string): NavGroup[] {
       section: t("nav.system"),
       items: [
         { href: "/orgs", label: t("nav.orgs") },
+        { href: "/admin/users", label: t("nav.users") },
         { href: "/admin/role", label: t("nav.role") },
         { href: "/admin/datasources", label: t("nav.datasources") },
         { href: "/admin/notification-log", label: t("nav.notification-log") },
@@ -121,6 +122,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
+  const impersonation = useAuthStore((s) => s.impersonation);
+  const endImpersonation = useAuthStore((s) => s.endImpersonation);
   const { data: unreadResp } = useUnreadInboxCount();
   const unread = unreadResp?.count ?? 0;
   const { locale, setLocale, t } = useI18n();
@@ -182,6 +185,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </SheetContent>
       </Sheet>
       <div className="flex flex-1 flex-col">
+        {impersonation.impersonating && (
+          <div className="flex items-center justify-between gap-3 border-b border-amber-300 bg-amber-100 px-4 py-2 text-xs text-amber-900 md:px-6">
+            <div>
+              <span className="mr-2 inline-flex items-center rounded-md bg-amber-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                Impersonate
+              </span>
+              当前以 <strong className="mx-1">{impersonation.targetUsername ?? "—"}</strong>
+              身份登录中（短期会话；到期需重新登录）。
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const ok = endImpersonation();
+                if (ok) {
+                  router.push("/dashboard");
+                } else {
+                  // 兜底：内存丢失原 token；让用户重新登录
+                  router.push("/login");
+                }
+              }}
+              className="rounded-md border border-amber-600 bg-white px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-50"
+            >
+              返回原身份
+            </button>
+          </div>
+        )}
         <header className="flex h-14 items-center justify-between border-b bg-background px-4 md:justify-end md:px-6">
           <button
             type="button"

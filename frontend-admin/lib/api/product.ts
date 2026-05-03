@@ -48,6 +48,8 @@ export type ProductVariant = {
   grams?: number | string;
   weightUnit?: string;
   barcode?: string;
+  /** 变体专属图（schema 里有 variant_image 字段，但 W1 一般不填，回退到产品主图） */
+  variantImage?: string;
 };
 
 export type ProductImage = {
@@ -56,6 +58,23 @@ export type ProductImage = {
   src: string;
   position: number;
   altText?: string;
+};
+
+export type ProductOption = {
+  id: number;
+  productId: number;
+  name: string;
+  position: number;
+  linkedTo?: string;
+};
+
+export type ProductMetafield = {
+  id: number;
+  productId: number;
+  namespace: string;
+  key: string;
+  value?: string;
+  type?: string;
 };
 
 export type ProductDetail = {
@@ -187,6 +206,24 @@ export const productApi = {
     api.post<{ logId: number }>(`/variant/${variantId}/sku`, { newSku }, {
       headers: { "X-Sensitive-Token": sensitiveToken },
     }),
+
+  // ===== Options（用于变体表动态列头）=====
+  optionList: (productId: number) =>
+    api.get<ProductOption[]>(`/product/${productId}/option`),
+
+  // ===== Metafields =====
+  metafieldList: (productId: number) =>
+    api.get<ProductMetafield[]>(`/product/${productId}/metafield`),
+  metafieldCreate: (productId: number, m: Partial<ProductMetafield>) =>
+    api.post<{ id: number }>(`/product/${productId}/metafield`, m),
+  metafieldUpdate: (id: number, patch: Partial<ProductMetafield>) =>
+    api.put<void>(`/metafield/${id}`, patch),
+  metafieldDelete: (id: number) => api.del<void>(`/metafield/${id}`),
+
+  // ===== 图片删除 / 重排序（不删 R2，仅 DB）=====
+  imageDelete: (imageId: number) => api.del<void>(`/product-image/${imageId}`),
+  imageReorder: (productId: number, ids: number[]) =>
+    api.post<{ updated: number }>(`/product/${productId}/image/reorder`, { ids }),
 
   // ===== 外部链接 =====
   linkList: (productId: number) =>
