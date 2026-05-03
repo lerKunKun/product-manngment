@@ -65,6 +65,10 @@ mybatis-plus:
       logic-not-delete-value: 'null'
       logic-delete-value: 'NOW()'
 
+# 产品文件上传（F2 子轨道）：先存本地 → 后台 worker 推 R2 → R2 完毕删本地
+upload:
+  local-dir: ${UPLOAD_LOCAL_DIR:./data/uploads}
+
 # R2 / MinIO（应用层读取，不进 Spring datasource）
 r2:
   endpoint: ${R2_ENDPOINT:http://localhost:9000}

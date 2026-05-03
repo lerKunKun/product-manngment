@@ -8,3 +8,5 @@ HELP.md
 .factorypath
 out/
 .flattened-pom.xml
+# F2 子轨道：本地暂存目录（运行时由 UploadConfig.@PostConstruct 创建）
+data/

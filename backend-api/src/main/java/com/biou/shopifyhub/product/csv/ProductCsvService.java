@@ -23,7 +23,9 @@ import java.io.Writer;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -194,70 +196,215 @@ public class ProductCsvService {
         }
     }
 
-    /** 导出当前所有产品为 CSV（按 owner_company_id 过滤）。 */
+    /** 单页拉多少条 product —— 控制内存：每页一次性 batch 拉 variant / image，不会爆。 */
+    private static final int EXPORT_PAGE_SIZE = 200;
+
+    /** 选中导出 ids 上限，防 DoS。 */
+    public static final int EXPORT_SELECTED_MAX = 1000;
+
+    /**
+     * 导出当前所有产品为 CSV（按 owner_company_id 过滤）。
+     * 保留向后兼容：旧调用 {@code exportCsv(ownerCompanyId, writer)} = 不带搜索筛选的全量导出。
+     */
     public void exportCsv(Long ownerCompanyId, Writer writer) {
+        exportFiltered(ownerCompanyId, null, null, writer);
+    }
+
+    /**
+     * 按列表筛选条件流式导出（沿用 {@code ProductController#list} 的过滤）。
+     * 实现：分页（每页 {@value EXPORT_PAGE_SIZE} 条 product）拉取，每页内 batch 一次拉
+     * variant / image（按 product_id IN (page_ids)），避免 N+1。
+     */
+    public void exportFiltered(Long ownerCompanyId, String keyword, String status, Writer writer) {
         try (PrintWriter pw = new PrintWriter(writer)) {
-            pw.write('﻿'); // UTF-8 BOM
-            pw.println(String.join(",", CsvFieldMapping.COLUMNS.stream().map(this::esc).toList()));
+            writeHeader(pw);
 
-            QueryWrapper<Product> q = new QueryWrapper<>();
-            if (ownerCompanyId != null) q.eq("owner_company_id", ownerCompanyId);
-            List<Product> products = productMapper.selectList(q);
-            for (Product p : products) {
-                List<ProductVariant> variants = variantMapper.selectList(
-                    new QueryWrapper<ProductVariant>().eq("product_id", p.getId()).orderByAsc("position"));
-                List<ProductImage> images = imageMapper.selectList(
-                    new QueryWrapper<ProductImage>().eq("product_id", p.getId()).orderByAsc("position"));
-
-                int rowCount = Math.max(1, Math.max(variants.size(), images.size()));
-                for (int i = 0; i < rowCount; i++) {
-                    ProductVariant v = i < variants.size() ? variants.get(i) : null;
-                    ProductImage img = i < images.size() ? images.get(i) : null;
-                    String[] row = new String[42];
-                    row[0] = p.getHandle();
-                    if (i == 0) {
-                        row[1] = p.getTitle();
-                        row[2] = p.getBodyHtml();
-                        row[3] = p.getVendor();
-                        row[4] = p.getProductCategory();
-                        row[5] = p.getType();
-                        row[6] = p.getTags();
-                        row[7] = boolStr(p.getPublished());
-                        row[32] = p.getSeoTitle();
-                        row[33] = p.getSeoDescription();
-                        row[38] = p.getStatus();
-                    }
-                    if (v != null) {
-                        row[9] = v.getOption1();
-                        row[12] = v.getOption2();
-                        row[15] = v.getOption3();
-                        row[17] = v.getSku();
-                        row[18] = decStr(v.getGrams());
-                        row[19] = v.getInventoryTracker();
-                        row[20] = intStr(v.getInventoryQty());
-                        row[21] = v.getInventoryPolicy();
-                        row[22] = v.getFulfillmentService();
-                        row[23] = decStr(v.getPrice());
-                        row[24] = decStr(v.getCompareAtPrice());
-                        row[25] = boolStr(v.getRequiresShipping());
-                        row[26] = boolStr(v.getTaxable());
-                        row[27] = v.getBarcode();
-                        row[34] = v.getVariantImage();
-                        row[35] = v.getWeightUnit();
-                        row[36] = v.getTaxCode();
-                        row[37] = decStr(v.getCostPerItem());
-                    }
-                    if (img != null) {
-                        row[28] = img.getSrc();
-                        row[29] = intStr(img.getPosition());
-                        row[30] = img.getAltText();
-                        row[31] = boolStr(img.getGiftCard());
-                    }
-                    pw.println(String.join(",", java.util.Arrays.stream(row)
-                        .map(this::esc).toList()));
+            long pageNo = 1;
+            while (true) {
+                QueryWrapper<Product> q = new QueryWrapper<Product>().orderByAsc("id");
+                if (ownerCompanyId != null) q.eq("owner_company_id", ownerCompanyId);
+                if (status != null && !status.isBlank()) q.eq("status", status);
+                if (keyword != null && !keyword.isBlank()) {
+                    q.and(w -> w.like("title", keyword)
+                        .or().like("handle", keyword)
+                        .or().like("vendor", keyword)
+                        .or().like("tags", keyword));
                 }
+                com.baomidou.mybatisplus.extension.plugins.pagination.Page<Product> req =
+                    new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(pageNo, EXPORT_PAGE_SIZE);
+                req.setSearchCount(false);
+                com.baomidou.mybatisplus.core.metadata.IPage<Product> p = productMapper.selectPage(req, q);
+                List<Product> products = p.getRecords();
+                if (products.isEmpty()) break;
+
+                writeBatch(pw, products);
+                pw.flush();
+
+                if (products.size() < EXPORT_PAGE_SIZE) break;
+                pageNo++;
             }
         }
+    }
+
+    /**
+     * 选中导出：按给定 ids 顺序流式导出。批大小同样为 {@value EXPORT_PAGE_SIZE}。
+     * @param ids 上限 {@value EXPORT_SELECTED_MAX}，超出抛 {@link BusinessException}
+     */
+    public void exportSelected(List<Long> ids, Writer writer) {
+        if (ids == null || ids.isEmpty()) {
+            try (PrintWriter pw = new PrintWriter(writer)) {
+                writeHeader(pw);
+            }
+            return;
+        }
+        if (ids.size() > EXPORT_SELECTED_MAX) {
+            throw new BusinessException(ResultCode.VALIDATION_FAILED,
+                "选中导出数量上限 " + EXPORT_SELECTED_MAX + "，当前 " + ids.size());
+        }
+
+        try (PrintWriter pw = new PrintWriter(writer)) {
+            writeHeader(pw);
+
+            // 分批 IN 查询，保持 ids 原始顺序
+            for (int from = 0; from < ids.size(); from += EXPORT_PAGE_SIZE) {
+                int to = Math.min(from + EXPORT_PAGE_SIZE, ids.size());
+                List<Long> chunk = ids.subList(from, to);
+
+                List<Product> products = productMapper.selectList(
+                    new QueryWrapper<Product>().in("id", chunk));
+                if (products.isEmpty()) continue;
+
+                // 还原顺序：按 chunk 里 id 出现顺序排列
+                Map<Long, Product> byId = new HashMap<>(products.size());
+                for (Product pr : products) byId.put(pr.getId(), pr);
+                List<Product> ordered = new ArrayList<>(chunk.size());
+                for (Long id : chunk) {
+                    Product pr = byId.get(id);
+                    if (pr != null) ordered.add(pr);
+                }
+
+                writeBatch(pw, ordered);
+                pw.flush();
+            }
+        }
+    }
+
+    /** 写 BOM + header（43 列）。 */
+    private void writeHeader(PrintWriter pw) {
+        pw.write('﻿'); // UTF-8 BOM
+        pw.println(String.join(",", CsvFieldMapping.COLUMNS.stream().map(this::esc).toList()));
+    }
+
+    /**
+     * 一批 product 一起写入：batch 拉所有 variant / image，按 product_id 聚合，逐条 product 渲染。
+     */
+    private void writeBatch(PrintWriter pw, List<Product> products) {
+        if (products.isEmpty()) return;
+
+        List<Long> pageIds = new ArrayList<>(products.size());
+        for (Product pr : products) pageIds.add(pr.getId());
+
+        // 1 次 SELECT 拉本批所有 variants
+        List<ProductVariant> allVariants = variantMapper.selectList(
+            new QueryWrapper<ProductVariant>()
+                .in("product_id", pageIds)
+                .orderByAsc("product_id").orderByAsc("position"));
+        Map<Long, List<ProductVariant>> variantsByProduct = new HashMap<>(pageIds.size());
+        for (ProductVariant v : allVariants) {
+            variantsByProduct.computeIfAbsent(v.getProductId(), k -> new ArrayList<>()).add(v);
+        }
+
+        // 1 次 SELECT 拉本批所有 images
+        List<ProductImage> allImages = imageMapper.selectList(
+            new QueryWrapper<ProductImage>()
+                .in("product_id", pageIds)
+                .orderByAsc("product_id").orderByAsc("position"));
+        Map<Long, List<ProductImage>> imagesByProduct = new HashMap<>(pageIds.size());
+        for (ProductImage img : allImages) {
+            imagesByProduct.computeIfAbsent(img.getProductId(), k -> new ArrayList<>()).add(img);
+        }
+
+        for (Product p : products) {
+            List<ProductVariant> variants = variantsByProduct.getOrDefault(p.getId(), Collections.emptyList());
+            List<ProductImage> images = imagesByProduct.getOrDefault(p.getId(), Collections.emptyList());
+            writeProductRows(pw, p, variants, images);
+        }
+    }
+
+    /**
+     * 写一个 product 的全部 CSV 行（Shopify 多行格式）。
+     * <p>「Image URLs」聚合列：按 position ASC 拼所有 src，分号分隔；只在 i==0 首行写。
+     */
+    private void writeProductRows(PrintWriter pw, Product p,
+                                  List<ProductVariant> variants, List<ProductImage> images) {
+        int rowCount = Math.max(1, Math.max(variants.size(), images.size()));
+
+        // F-Q3：图片改动立即体现到下次导出 —— images 已按 position ASC 即时取自 DB，不缓存
+        String aggregatedImageUrls = aggregateImageUrls(images);
+
+        for (int i = 0; i < rowCount; i++) {
+            ProductVariant v = i < variants.size() ? variants.get(i) : null;
+            ProductImage img = i < images.size() ? images.get(i) : null;
+            String[] row = new String[CsvFieldMapping.COLUMN_COUNT];
+            row[0] = p.getHandle();
+            if (i == 0) {
+                row[1] = p.getTitle();
+                row[2] = p.getBodyHtml();
+                row[3] = p.getVendor();
+                row[4] = p.getProductCategory();
+                row[5] = p.getType();
+                row[6] = p.getTags();
+                row[7] = boolStr(p.getPublished());
+                row[32] = p.getSeoTitle();
+                row[33] = p.getSeoDescription();
+                row[38] = p.getStatus();
+                // Image URLs 只在首行写，避免重复
+                row[CsvFieldMapping.IMAGE_URLS_INDEX] = aggregatedImageUrls;
+            }
+            if (v != null) {
+                row[9] = v.getOption1();
+                row[12] = v.getOption2();
+                row[15] = v.getOption3();
+                row[17] = v.getSku();
+                row[18] = decStr(v.getGrams());
+                row[19] = v.getInventoryTracker();
+                row[20] = intStr(v.getInventoryQty());
+                row[21] = v.getInventoryPolicy();
+                row[22] = v.getFulfillmentService();
+                row[23] = decStr(v.getPrice());
+                row[24] = decStr(v.getCompareAtPrice());
+                row[25] = boolStr(v.getRequiresShipping());
+                row[26] = boolStr(v.getTaxable());
+                row[27] = v.getBarcode();
+                row[34] = v.getVariantImage();
+                row[35] = v.getWeightUnit();
+                row[36] = v.getTaxCode();
+                row[37] = decStr(v.getCostPerItem());
+            }
+            if (img != null) {
+                row[28] = img.getSrc();
+                row[29] = intStr(img.getPosition());
+                row[30] = img.getAltText();
+                row[31] = boolStr(img.getGiftCard());
+            }
+            pw.println(String.join(",", java.util.Arrays.stream(row)
+                .map(this::esc).toList()));
+        }
+    }
+
+    /** 把 images 全部 src 拼成单元格内容，分号分隔；空时返回空串。 */
+    private String aggregateImageUrls(List<ProductImage> images) {
+        if (images == null || images.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (ProductImage img : images) {
+            String src = img.getSrc();
+            if (src == null || src.isBlank()) continue;
+            if (!first) sb.append(';');
+            sb.append(src);
+            first = false;
+        }
+        return sb.toString();
     }
 
     // ===== utils =====

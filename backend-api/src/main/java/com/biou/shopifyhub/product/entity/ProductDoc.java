@@ -6,8 +6,10 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @TableName(value = "product_doc", autoResultMap = true)
 public class ProductDoc {
@@ -25,6 +27,20 @@ public class ProductDoc {
     private String title;
     private Integer sort;
     private Long createdBy;
+
+    /** V30：标签数组（前端校验必填） */
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private List<String> tags;
+    /** V30：备注 */
+    private String remark;
+    /** V30：本地暂存路径 */
+    private String localPath;
+    /** V30：R2 上传状态 */
+    private String r2Status;
+    /** V30：上传失败原因 */
+    private String r2Error;
+    /** V30：office 病毒扫描状态（占位） */
+    private String scanStatus;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
@@ -57,6 +73,18 @@ public class ProductDoc {
     public void setSort(Integer sort) { this.sort = sort; }
     public Long getCreatedBy() { return createdBy; }
     public void setCreatedBy(Long createdBy) { this.createdBy = createdBy; }
+    public List<String> getTags() { return tags; }
+    public void setTags(List<String> tags) { this.tags = tags; }
+    public String getRemark() { return remark; }
+    public void setRemark(String remark) { this.remark = remark; }
+    public String getLocalPath() { return localPath; }
+    public void setLocalPath(String localPath) { this.localPath = localPath; }
+    public String getR2Status() { return r2Status; }
+    public void setR2Status(String r2Status) { this.r2Status = r2Status; }
+    public String getR2Error() { return r2Error; }
+    public void setR2Error(String r2Error) { this.r2Error = r2Error; }
+    public String getScanStatus() { return scanStatus; }
+    public void setScanStatus(String scanStatus) { this.scanStatus = scanStatus; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

@@ -65,6 +65,8 @@ function getNavGroups(t: (k: MessageKey) => string): NavGroup[] {
         { href: "/orgs", label: t("nav.orgs") },
         { href: "/admin/users", label: t("nav.users") },
         { href: "/admin/role", label: t("nav.role") },
+        // TODO i18n: G2 新增「角色画布」入口（不动 lib/i18n/messages.ts）
+        { href: "/admin/canvas", label: "角色画布" },
         { href: "/admin/datasources", label: t("nav.datasources") },
         { href: "/admin/notification-log", label: t("nav.notification-log") },
         { href: "/admin/audit-log", label: t("nav.audit-log") },

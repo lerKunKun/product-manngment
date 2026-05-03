@@ -10,7 +10,7 @@ public final class CsvFieldMapping {
 
     private CsvFieldMapping() {}
 
-    /** 42 列固定顺序（用作 CSV header） */
+    /** 43 列固定顺序（用作 CSV header）。索引 42 = Image URLs（聚合所有图 src，分号分隔，单元格内）。 */
     public static final List<String> COLUMNS = List.of(
         "Handle",                           // 0
         "Title",                            // 1
@@ -53,6 +53,13 @@ public final class CsvFieldMapping {
         "Status",                           // 38
         "Included / United States",         // 39   （地区税务/上架开关，可空）
         "Price / United States",            // 40   （地区差价，可空）
-        "Compare At Price / United States"  // 41
+        "Compare At Price / United States", // 41
+        "Image URLs"                        // 42   （F3 子轨道：按 product_image.position ASC 取全部 cdn URL，分号分隔；只在每个 handle 的首行写入）
     );
+
+    /** 列总数（index 42 + 1）。 */
+    public static final int COLUMN_COUNT = COLUMNS.size();
+
+    /** 「Image URLs」聚合列下标。 */
+    public static final int IMAGE_URLS_INDEX = 42;
 }

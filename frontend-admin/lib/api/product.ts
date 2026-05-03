@@ -58,6 +58,21 @@ export type ProductImage = {
   src: string;
   position: number;
   altText?: string;
+  // F2 新增：生命周期 + 标签 / 备注 / 缩略图
+  tags?: string[];
+  remark?: string;
+  localPath?: string | null;
+  r2Key?: string | null;
+  r2Status?: "PENDING" | "UPLOADING" | "DONE" | "FAILED";
+  r2Error?: string | null;
+  thumbnailUrl?: string | null;
+  mediaType?: "IMAGE" | "VIDEO";
+};
+
+export type FileScanStatus = {
+  scanned: boolean;
+  status: "NOT_SCANNED" | "CLEAN" | "INFECTED" | "FAILED";
+  message: string;
 };
 
 export type ProductOption = {
@@ -126,6 +141,13 @@ export type ProductDoc = {
   fileMime?: string;
   title?: string;
   createdAt?: string;
+  // F2 新增
+  tags?: string[];
+  remark?: string;
+  localPath?: string | null;
+  r2Status?: "PENDING" | "UPLOADING" | "DONE" | "FAILED";
+  r2Error?: string | null;
+  scanStatus?: "NOT_SCANNED" | "CLEAN" | "INFECTED" | "FAILED";
 };
 
 function authedFetch(path: string, init: RequestInit = {}) {
@@ -180,6 +202,63 @@ export const productApi = {
   exportUrl: (ownerCompanyId?: number) =>
     `/api/product/export${ownerCompanyId ? `?ownerCompanyId=${ownerCompanyId}` : ""}`,
 
+  /**
+   * F3 子轨道 — 浏览器下载 CSV。
+   *
+   * 用 fetch + blob 而不是 window.location.href，因为 access token 在 Authorization
+   * header 里（不是 cookie），原生 download 无法附加 header。
+   *
+   * - mode='all'：按列表筛选条件全量导出（沿用 keyword/status/ownerCompanyId）
+   * - mode='selected'：按 ids 顺序导出（后端上限 1000）
+   *
+   * @returns 触发完下载（含错误 toast）。失败抛错，调用方可清 loading。
+   */
+  exportCsv: async (params: {
+    mode: "all" | "selected";
+    ids?: number[];
+    keyword?: string;
+    status?: string;
+    ownerCompanyId?: number;
+  }) => {
+    const q = new URLSearchParams();
+    q.set("mode", params.mode);
+    if (params.mode === "selected") {
+      if (!params.ids || params.ids.length === 0) {
+        throw new Error("ids 不能为空");
+      }
+      q.set("ids", params.ids.join(","));
+    } else {
+      if (params.keyword) q.set("keyword", params.keyword);
+      if (params.status) q.set("status", params.status);
+      if (params.ownerCompanyId) q.set("ownerCompanyId", String(params.ownerCompanyId));
+    }
+
+    const resp = await authedFetch(`/api/product/export?${q.toString()}`, {
+      method: "GET",
+    });
+    if (!resp.ok) {
+      // 后端 4xx 业务错误体是 JSON
+      let msg = `HTTP ${resp.status}`;
+      try {
+        const j = await resp.json();
+        if (j && j.message) msg = j.message;
+      } catch {
+        // 非 JSON：保持原始 status
+      }
+      throw new Error(msg);
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `products_export_${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  /** @deprecated F2：保留旧端点用于 TipTap 富文本上传；产品媒体走 uploadImageV2 */
   uploadImage: async (productId: number, file: File) => {
     const fd = new FormData();
     fd.append("file", file);
@@ -187,6 +266,33 @@ export const productApi = {
       imageId: number; src: string; key: string;
     };
   },
+
+  /**
+   * F2 新版图片 / 视频上传：先存本地 → 后台 worker 推 R2。
+   * 立即返回 {id, r2Status:'PENDING'}，前端轮询 imageList 直到 DONE。
+   */
+  uploadImageV2: async (
+    productId: number,
+    file: File,
+    tags: string[],
+    remark?: string,
+    position?: number
+  ) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("tags", JSON.stringify(tags));
+    if (remark) fd.append("remark", remark);
+    if (position !== undefined) fd.append("position", String(position));
+    return (await uploadMultipart(`/api/product/${productId}/image/upload`, fd)) as {
+      id: number;
+      r2Status: "PENDING" | "UPLOADING" | "DONE" | "FAILED";
+      mediaType: "IMAGE" | "VIDEO";
+    };
+  },
+
+  /** F2：拉产品所有图片 / 视频（含 r2_status 等新字段，前端轮询用） */
+  imageList: (productId: number) =>
+    api.get<ProductImage[]>(`/product/${productId}/image`),
 
   uploadDocImage: async (productId: number, file: File) => {
     const fd = new FormData();
@@ -243,14 +349,30 @@ export const productApi = {
   // ===== 媒体 / 需求文档 =====
   docList: (productId: number) =>
     api.get<ProductDoc[]>(`/product/${productId}/doc`),
-  docUpload: async (productId: number, file: File, title?: string) => {
+  docUpload: async (
+    productId: number,
+    file: File,
+    tags: string[],
+    remark?: string,
+    title?: string
+  ) => {
     const fd = new FormData();
     fd.append("file", file);
+    fd.append("tags", JSON.stringify(tags));
+    if (remark) fd.append("remark", remark);
     if (title) fd.append("title", title);
     return (await uploadMultipart(`/api/product/${productId}/doc/upload`, fd)) as {
-      id: number; url: string; key: string; fileName: string; fileSize: number;
+      id: number;
+      r2Status: "PENDING" | "UPLOADING" | "DONE" | "FAILED";
+      scanStatus: "NOT_SCANNED" | "CLEAN" | "INFECTED" | "FAILED";
+      fileName: string;
+      fileSize: number;
     };
   },
+
+  /** F2：占位扫描状态接口，供下载前调用 */
+  getScanStatus: (type: "image" | "video" | "doc", id: number) =>
+    api.get<FileScanStatus>(`/file/${type}/${id}/scan-status`),
   docSaveRich: (productId: number, json: string, title?: string, id?: number) =>
     api.post<{ id: number }>(`/product/${productId}/doc/rich`, { id, title, json }),
   docDelete: (id: number) => api.del<void>(`/doc/${id}`),

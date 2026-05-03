@@ -28,6 +28,9 @@ export default function ProductsPage() {
   const [status, setStatus] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // F3 子轨道：导出 loading 态（all / selected 各一份，互不阻塞）
+  const [exportingAll, setExportingAll] = useState(false);
+  const [exportingSelected, setExportingSelected] = useState(false);
   const toast = useToast();
 
   const { data, isPending, error, refetch } = useProducts({
@@ -101,6 +104,39 @@ export default function ProductsPage() {
     setAppliedKeyword(keyword);
   }
 
+  // F3 子轨道：全量导出（沿用当前列表筛选条件）
+  async function exportAll() {
+    if (exportingAll) return;
+    setExportingAll(true);
+    try {
+      await productApi.exportCsv({
+        mode: "all",
+        keyword: appliedKeyword,
+        status,
+      });
+    } catch (e) {
+      toast.error((e as Error).message || "导出失败"); // TODO i18n
+    } finally {
+      setExportingAll(false);
+    }
+  }
+
+  // F3 子轨道：选中导出（后端上限 1000）
+  async function exportSelected() {
+    if (exportingSelected || selected.size === 0) return;
+    setExportingSelected(true);
+    try {
+      await productApi.exportCsv({
+        mode: "selected",
+        ids: Array.from(selected),
+      });
+    } catch (e) {
+      toast.error((e as Error).message || "导出失败"); // TODO i18n
+    } finally {
+      setExportingSelected(false);
+    }
+  }
+
   const virtualItems = virtualizer.getVirtualItems();
   const errorMsg = error ? (error as Error).message : null;
 
@@ -169,14 +205,15 @@ export default function ProductsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t("products.title")}</h1>
         <div className="flex gap-2">
-          <a
-            href={productApi.exportUrl()}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-md border px-4 py-2 text-sm hover:bg-accent"
+          {/* F3 子轨道：导出全部（沿用当前筛选条件）。fetch+blob 下载，因为 token 走 Authorization header */}
+          <button
+            type="button"
+            onClick={exportAll}
+            disabled={exportingAll}
+            className="rounded-md border px-4 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {t("products.exportCsv")}
-          </a>
+            {exportingAll ? "导出中..." /* TODO i18n */ : "导出全部" /* TODO i18n */}
+          </button>
           <Link href="/products/import" className="rounded-md border px-4 py-2 text-sm hover:bg-accent">
             {t("products.importCsv")}
           </Link>
@@ -215,6 +252,16 @@ export default function ProductsPage() {
           <button onClick={() => batchStatus("active")} className="rounded border px-3 py-1 hover:bg-accent">{t("products.batch.active")}</button>
           <button onClick={() => batchStatus("draft")} className="rounded border px-3 py-1 hover:bg-accent">{t("products.batch.draft")}</button>
           <button onClick={() => batchStatus("archived")} className="rounded border px-3 py-1 hover:bg-accent">{t("products.batch.archived")}</button>
+          {/* F3 子轨道：导出选中（最多 1000 条，后端会校验） */}
+          <button
+            onClick={exportSelected}
+            disabled={exportingSelected}
+            className="rounded border px-3 py-1 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {exportingSelected
+              ? "导出中..." /* TODO i18n */
+              : `导出选中 (${selected.size})` /* TODO i18n */}
+          </button>
           <button onClick={batchDelete} className="rounded border border-destructive px-3 py-1 text-destructive hover:bg-destructive/10">{t("products.batch.delete")}</button>
           <button onClick={() => setSelected(new Set())} className="text-xs text-muted-foreground hover:text-foreground">{t("products.batch.cancel")}</button>
         </div>
