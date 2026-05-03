@@ -2,19 +2,26 @@
 
 Shopify 多店铺资产管理 + 产品库 + 一键开店 + 审批 / 通知 / 监控 一体化控制台。
 
-> **最新阶段**：Wave 4 完成（v0.4.0-rc）— 审批中心 / 钉钉订阅 / 站内信 / 审计归档 / 灾备 / 上线材料齐全
+> **最新阶段**：v0.5.0-rc — Wave 4 完工 + 9 sprint × 37 track 改进迭代收尾
+>
+> 后端 43 controllers / Flyway V1..V25 / 6 Micrometer metric / 31 测试 case · 前端 35+ 路由 / 17 ui 组件 / TanStack Query / dark mode / i18n 双语 / 7 Playwright spec · ci 7 job / pre-commit hook / 部署 step-by-step。**漏洞清零（16→0）**。
 >
 > **核心文档**：
 > - 📐 [系统设计文档.md](./系统设计文档.md) v1.3 — 总体架构 / 数据流 / 14 章节
 > - 🧭 [系统功能说明.md](./系统功能说明.md) — 面向产品 / QA / 新人的功能清单
-> - 📋 [TODO清单.md](./TODO清单.md) — 配置 / 调试 / 上线前自检事项
-> - 🛠 [配置指南.md](./配置指南.md) — 外部账号申请 + 凭证填入步骤
-> - 📅 [开发任务拆解.md](./开发任务拆解.md) — 4 个 Wave 全部任务清单（带状态）
-> - 📈 [进度记录.md](./进度记录.md) — 开发进度史（按时间倒序）
-> - 🎯 [并行任务编排.md](./并行任务编排.md) — 多 track 并行开发指引
-> - 🔧 [技术债登记.md](./技术债登记.md) — 未还的代码债（带触发条件）
+> - 📊 [改进迭代史.md](./改进迭代史.md) ⭐ — 9 sprint × 37 track 全部交付归档
+> - 🔍 [项目检查报告.md](./项目检查报告.md) — 设计 vs 实现 diff 审计
+> - 🎨 [前端改进文档.md](./前端改进文档.md) — UX / 缺失界面建议
+> - 📋 [TODO清单.md](./TODO清单.md) — 配置 / 调试 / 上线前 9 个 P0 阻塞项
+> - 🛠 [配置指南.md](./配置指南.md) — 外部账号申请 + 凭证填入
+> - 📅 [开发任务拆解.md](./开发任务拆解.md) — 4 Wave 全部任务清单
+> - 📈 [进度记录.md](./进度记录.md) — 开发进度史
+> - 🎯 [并行任务编排.md](./并行任务编排.md) — 原始多 track 编排原则
+> - 🔧 [技术债登记.md](./技术债登记.md) — 未还代码债（带触发条件）
 > - 🚀 [性能优化复盘.md](./性能优化复盘.md) — Wave 3 性能优化总结
 > - 🛒 [采购清单.md](./采购清单.md) — 服务器 / 域名 / 第三方账号采购
+>
+> **运维文档**：[ops/deploy/](./ops/deploy/) 部署 step-by-step · [ops/backup/](./ops/backup/) 备份 + 恢复 SOP · [ops/disaster-recovery/](./ops/disaster-recovery/) DR 演练 · [ops/monitoring/](./ops/monitoring/) 监控栈 · [ops/release/](./ops/release/) 上线材料
 
 ---
 
@@ -22,20 +29,23 @@ Shopify 多店铺资产管理 + 产品库 + 一键开店 + 审批 / 通知 / 监
 
 ```
 .
-├── frontend-admin/              # Next.js 15 + React 19 + shadcn/ui + TipTap（21 路由）
-├── backend-api/                 # Spring Boot 3.3 + Java 21 + MyBatis-Plus + Flyway V1..V24
+├── frontend-admin/              # Next.js 15 + React 19 + shadcn/ui + TipTap + TanStack Query
+│                                # 35+ 路由 / 17 ui 组件 / dark mode / i18n 双语 / Playwright e2e
+├── backend-api/                 # Spring Boot 3.3 + Java 21 + MyBatis-Plus + Flyway V1..V25
+│                                # 43 controllers / 6 Micrometer metric / 31 测试 case / jacoco
 ├── asset-worker/                # FastAPI + Shopify CLI / Admin / R2 SDK
 ├── ops/
 │   ├── bootstrap/               # 服务器开荒脚本 (00-99)
-│   ├── deploy/                  # 各节点 docker-compose
-│   ├── monitoring/              # Prometheus + Grafana + Loki + Alertmanager
+│   ├── deploy/                  # 4 节点 step-by-step + Cloudflare Tunnel + WireGuard mesh
+│   ├── monitoring/              # Prometheus + Grafana + Loki + Alertmanager（5 group rules）
 │   ├── backup/                  # rds-backup.sh / audit-purge.sh / decrypt.sh / restore-sop.md
 │   ├── disaster-recovery/       # dr-drill-sop.md（季度演练）
 │   └── release/                 # Shopify App / 法务 / Wave 4 e2e 清单
-├── bin/                         # dev-up / dev-backend / dev-frontend / smoke-test / e2e-saga
-├── .github/workflows/           # CI（4 job 并行：前端 / 后端 / worker / trivy）
+├── bin/                         # dev-up / dev-backend / dev-frontend / smoke-test / e2e-saga / e2e-wave4
+├── .github/workflows/           # CI 7 job：前端 / 后端 + jacoco / worker / trivy / e2e-wave4 / e2e-frontend
+├── .githooks/                   # pre-commit (敏感文件 / secret pattern / tsc / mvn 增量)
 ├── docker-compose.dev.yml       # 本地开发栈：mysql:8 + redis + rabbit + minio
-└── *.md                         # 设计 / 进度 / 功能 / TODO 文档
+└── *.md                         # 设计 / 进度 / 功能 / TODO / 改进迭代史 等
 ```
 
 ---
@@ -153,7 +163,9 @@ colima start --cpu 4 --memory 8 --disk 60
 
 ## 当前阶段
 
-🎉 **Wave 4 完工**（v0.4.0-rc）
+🎉 **v0.5.0-rc**（Wave 4 完工 + 9 sprint × 37 track 改进收尾）
+
+### Wave 阶段
 
 | Wave | 状态 | 范围 |
 |---|---|---|
@@ -163,7 +175,30 @@ colima start --cpu 4 --memory 8 --disk 60
 | Wave 3 | ✅ | 一键开店 saga / 合作者店铺池 / 模板库 / 指导文档 / 跨公司授权 / 性能优化 |
 | Wave 4 | ✅ | 审批 / 通知订阅 / 邮件 + 站内信 / 审计归档 / 备份 / 监控完善 / 灾备 / 上线材料 |
 
-总计：4 个子项目（backend / asset-worker / frontend-admin / ops），24 个 Flyway migration，21 个前端路由，5 组 Prometheus rules，10+ ops 脚本。
+### 9 个改进 Sprint（37 track）
+
+| Sprint | 主题 | 详情 |
+|---|---|---|
+| Sprint 1 | 后端关键修复 + admin controllers + 前端 Shell + 采购 + admin 2 页 | [编排](./并行改进编排.md) |
+| Sprint 2 | /orgs + /admin/role + dashboard 折线 + Breadcrumb + tasks/saga/stores 增强 | [编排](./并行改进编排-Sprint2.md) |
+| Sprint 3 | 后端 5 endpoints + 产品历史 + cross-auth 增强 + ops + 6 ui 组件 | [编排](./并行改进编排-Sprint3.md) |
+| Sprint 4 | 4 ops endpoints + TanStack Query + Dark mode + 4 页重构 | [编排](./并行改进编排-Sprint4.md) |
+| Sprint 5 | E2E 自动化 + task cancel + Stepper + virtualizer | [编排](./并行改进编排-Sprint5.md) |
+| Sprint 6 | 后端补 5 endpoints + Query 扩展 + CI 加固 + datasources UI | [编排](./并行改进编排-Sprint6.md) |
+| Sprint 7 | datasource 完整化 + i18n 试点 + 后端测试 + Playwright | [编排](./并行改进编排-Sprint7.md) |
+| Sprint 8 | i18n v2 + Playwright 扩展 + 后端测试扩展 + 依赖升级（漏洞 16→0）| [编排](./并行改进编排-Sprint8.md) |
+| Sprint 9 | i18n v3 + jacoco + 部署文档 + Mock Shopify | [编排](./并行改进编排-Sprint9.md) |
+
+完整归档见 [改进迭代史.md](./改进迭代史.md)。
+
+### 数字总览
+
+- 4 个子项目（backend / asset-worker / frontend-admin / ops）
+- **后端**：43 controllers / Flyway V1..V25 / 6 Micrometer metric / 31 测试 case / jacoco
+- **前端**：35+ 路由 / 17 ui 组件 / TanStack Query / dark mode / i18n 双语 ~300 key / 7 Playwright spec
+- **CI/CD**：7 job（含 e2e-wave4 + e2e-frontend Playwright）+ pre-commit hook 4 检查
+- **运维**：5 group Prometheus rules + 10+ ops 脚本 + 4 节点部署 step-by-step（978 行文档）
+- **安全**：0 漏洞（next 15.0.3 → 15.5.15 + postcss 8.5.10+ override）
 
 ---
 
