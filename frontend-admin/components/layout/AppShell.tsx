@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/auth/store";
 import { authApi } from "@/lib/api/auth";
-import { inboxApi } from "@/lib/api/inbox";
+import { useUnreadInboxCount } from "@/lib/queries/inbox";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetHeader, SheetTitle, SheetContent } from "@/components/ui/Sheet";
 
@@ -59,6 +59,7 @@ const NAV_GROUPS: {
     items: [
       { href: "/orgs", label: "组织管理" },
       { href: "/admin/role", label: "角色管理" },
+      { href: "/admin/datasources", label: "数据源" },
       { href: "/admin/notification-log", label: "通知日志" },
       { href: "/admin/audit-log", label: "审计日志" },
       { href: "/admin/ops", label: "备份归档" },
@@ -112,7 +113,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
-  const [unread, setUnread] = useState(0);
+  const { data: unreadResp } = useUnreadInboxCount();
+  const unread = unreadResp?.count ?? 0;
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -120,24 +122,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setTheme(
       document.documentElement.classList.contains("dark") ? "dark" : "light"
     );
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    async function tick() {
-      try {
-        const r = await inboxApi.unreadCount();
-        if (alive) setUnread(r?.count ?? 0);
-      } catch {
-        /* ignore */
-      }
-    }
-    tick();
-    const t = window.setInterval(tick, 30_000);
-    return () => {
-      alive = false;
-      window.clearInterval(t);
-    };
   }, []);
 
   function toggleTheme() {

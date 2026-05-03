@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { productApi, type Product } from "@/lib/api/product";
+import { useProducts, useInvalidateProducts } from "@/lib/queries/products";
 import { useToast } from "@/components/ui/Toast";
 import { ErrorBanner, LoadingBlock, EmptyState } from "@/components/ui/StatusBlocks";
 
@@ -17,16 +18,23 @@ const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
 const GRID_COLS = "grid-cols-[40px_60px_1fr_2fr_1fr_80px_140px]";
 
 export default function ProductsPage() {
-  const [records, setRecords] = useState<Product[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [size] = useState(20);
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [appliedKeyword, setAppliedKeyword] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const toast = useToast();
+
+  const { data, isPending, error, refetch } = useProducts({
+    page,
+    size,
+    status,
+    q: appliedKeyword,
+  });
+  const invalidateProducts = useInvalidateProducts();
+  const records: Product[] = data?.records ?? [];
+  const total = data?.total ?? 0;
 
   const parentRef = useRef<HTMLDivElement>(null);
   const ENABLE_VIRTUAL = records.length > 50;
@@ -36,25 +44,6 @@ export default function ProductsPage() {
     estimateSize: () => 44,
     overscan: 5,
   });
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    setSelected(new Set());
-    try {
-      const r = await productApi.list(page, size, keyword, status);
-      setRecords(r.records);
-      setTotal(r.total);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, [page, status]);
 
   function toggle(id: number) {
     const next = new Set(selected);
@@ -78,7 +67,8 @@ export default function ProductsPage() {
       const { sensitiveToken } = await productApi.verifySensitive("PRODUCT_BATCH_DELETE", code);
       const r = await productApi.batchDelete(Array.from(selected), sensitiveToken);
       toast.success(`已删除 ${r.deleted} 个产品`);
-      load();
+      setSelected(new Set());
+      invalidateProducts();
     } catch {
       // 错误已由全局 toast 上报
     }
@@ -89,7 +79,8 @@ export default function ProductsPage() {
     try {
       const r = await productApi.batchStatus(Array.from(selected), s);
       toast.success(`已更新 ${r.updated} 个产品状态`);
-      load();
+      setSelected(new Set());
+      invalidateProducts();
     } catch {
       // 全局 toast 已处理
     }
@@ -98,10 +89,11 @@ export default function ProductsPage() {
   function search(e: React.FormEvent) {
     e.preventDefault();
     setPage(1);
-    load();
+    setAppliedKeyword(keyword);
   }
 
   const virtualItems = virtualizer.getVirtualItems();
+  const errorMsg = error ? (error as Error).message : null;
 
   function renderRowContent(p: Product, checked: boolean) {
     const sl = STATUS_LABEL[p.status] ?? STATUS_LABEL.draft;
@@ -194,7 +186,7 @@ export default function ProductsPage() {
         </div>
       )}
 
-      <ErrorBanner message={error} onRetry={load} />
+      <ErrorBanner message={errorMsg} onRetry={() => refetch()} />
 
       {/* Sticky header */}
       <div className="rounded-t-lg border-x border-t bg-muted/50 text-xs uppercase text-muted-foreground">
@@ -217,7 +209,7 @@ export default function ProductsPage() {
       </div>
 
       {/* Body: loading / empty / virtualized list */}
-      {loading ? (
+      {isPending ? (
         <div className="rounded-b-lg border-x border-b">
           <LoadingBlock />
         </div>

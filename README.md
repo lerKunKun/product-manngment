@@ -137,6 +137,7 @@ colima start --cpu 4 --memory 8 --disk 60
 - **跨模块禁止直调 Service**，必须走 RabbitMQ 事件
 - **跨数据源事务禁止**
 - **Flyway 版本号**：每 track 预占（详见《并行任务编排.md》§7）
+- **pre-commit hook**：首次启用 `chmod +x .githooks/pre-commit && git config core.hooksPath .githooks`（敏感文件 / secret pattern / frontend tsc / backend mvn compile 4 项检查）
 
 详见《系统设计文档》14 节。
 

@@ -96,3 +96,83 @@ jobs:
           scan-type: fs
           severity: HIGH,CRITICAL
           exit-code: 0   # Wave 0 不阻断；Wave 1 改 1
+
+  e2e-wave4:
+    name: E2E Wave 4
+    needs: [backend, frontend, worker]
+    runs-on: ubuntu-latest
+    continue-on-error: true   # 起 backend 不稳定时不阻塞主 CI；后续稳定后改 false
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: shopifyhub
+          MYSQL_USER: shopifyhub
+          MYSQL_PASSWORD: shopifyhub_dev_pass
+        ports: ['3307:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:8-alpine
+        ports: ['6380:6379']
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=10
+      rabbitmq:
+        image: rabbitmq:4-management-alpine
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd="rabbitmq-diagnostics ping" --health-interval=10s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            mysqladmin ping -h127.0.0.1 -P3307 -uroot -proot && break
+            sleep 2
+          done
+
+      - name: Build & start backend
+        env:
+          SPRING_PROFILES_ACTIVE: dev
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3307
+          MYSQL_PLATFORM_DB: shopifyhub
+          MYSQL_USER: shopifyhub
+          MYSQL_PASSWORD: shopifyhub_dev_pass
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6380
+          MQ_HOST: 127.0.0.1
+          MQ_PORT: 5672
+        run: |
+          cd backend-api
+          mvn -B -DskipTests -q clean package
+          nohup java -jar target/*.jar > /tmp/backend.log 2>&1 &
+          for i in {1..60}; do
+            curl -fsS http://localhost:8080/api/health 2>/dev/null && break
+            sleep 2
+          done
+
+      - name: Run e2e-wave4
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3307
+          MYSQL_USER: shopifyhub
+          MYSQL_DB: shopifyhub
+          MYSQL_PASSWORD: shopifyhub_dev_pass
+        run: |
+          chmod +x bin/e2e-wave4.sh
+          bash bin/e2e-wave4.sh
+
+      - name: Backend log on failure
+        if: failure()
+        run: tail -300 /tmp/backend.log || true

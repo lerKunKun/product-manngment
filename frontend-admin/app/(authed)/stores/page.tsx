@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import {
   storeApi,
@@ -8,7 +8,7 @@ import {
   STORE_DISABLE_AVAILABLE,
   ASSET_TRIGGER_AVAILABLE,
 } from "@/lib/api/store";
-import type { ApiError } from "@/lib/api/client";
+import { useStores, useInvalidateStores } from "@/lib/queries/stores";
 import { useToast } from "@/components/ui/Toast";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
 
@@ -23,27 +23,14 @@ const SENSITIVE_DISABLE = "STORE_BATCH_DISABLE";
 
 export default function StoresPage() {
   const toast = useToast();
-  const [stores, setStores] = useState<StoreItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { data, isPending, error } = useStores();
+  const invalidateStores = useInvalidateStores();
+  const stores: StoreItem[] = data ?? [];
+  const errorMsg = error ? (error as Error).message : "";
+
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [healthChecking, setHealthChecking] = useState<Record<number, boolean>>({});
-
-  async function load() {
-    setLoading(true);
-    try {
-      setStores(await storeApi.list());
-    } catch (e) {
-      setError((e as ApiError).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
 
   const allSelected = useMemo(
     () => stores.length > 0 && stores.every((s) => selected.has(s.id)),
@@ -77,6 +64,7 @@ export default function StoresPage() {
       } else {
         toast.error(`#${id} 异常：${r.message ?? "未知错误"}`);
       }
+      invalidateStores();
     } finally {
       setHealthChecking((m) => ({ ...m, [id]: false }));
     }
@@ -145,7 +133,7 @@ export default function StoresPage() {
       if (failed > 0) toast.error(`${failed} 个店铺失败`);
       else toast.success("批量禁用完成");
       setSelected(new Set());
-      load();
+      invalidateStores();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -167,9 +155,9 @@ export default function StoresPage() {
         </Link>
       </div>
 
-      {error && (
+      {errorMsg && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
+          {errorMsg}
         </div>
       )}
 
@@ -236,10 +224,10 @@ export default function StoresPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && (
+            {isPending && (
               <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">加载中...</td></tr>
             )}
-            {!loading && stores.length === 0 && (
+            {!isPending && stores.length === 0 && (
               <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">暂无店铺，点右上角接入</td></tr>
             )}
             {stores.map((s) => {

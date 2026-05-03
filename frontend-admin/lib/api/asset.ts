@@ -7,4 +7,7 @@ import { api } from "./client";
 export const assetApi = {
   trigger: (storeId: number, snapshotType?: string): Promise<number> =>
     api.post<number>("/asset-snapshot/trigger", { storeId, snapshotType }),
+  /** T22: 取消 PENDING/RUNNING 快照。 */
+  cancel: (id: number): Promise<void> =>
+    api.post<void>(`/asset-snapshot/${id}/cancel`, null),
 };

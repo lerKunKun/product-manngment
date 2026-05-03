@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Biou × Shopify Hub - pre-commit hook
+# 启用方式：git config core.hooksPath .githooks
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YEL='\033[0;33m'
+NC='\033[0m'
+
+# 1. 拒绝提交敏感文件
+SENSITIVE=$(git diff --cached --name-only | grep -E '^(\.env$|配置信息\.md|.*\.key$|.*\.pem$|\.secrets/)' || true)
+if [ -n "$SENSITIVE" ]; then
+    echo -e "${RED}❌ 拒绝提交敏感文件:${NC}"
+    echo "$SENSITIVE"
+    echo "如确需提交，使用 git commit --no-verify"
+    exit 1
+fi
+
+# 2. secret pattern 检测
+DIFF=$(git diff --cached -U0 || true)
+PATTERNS='shpss_[a-f0-9]{20,}|atE[a-zA-Z0-9_-]{30,}|sk_live_[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+|aws_secret_access_key|wpat_[a-f0-9]+|shpat_[a-f0-9]+'
+if echo "$DIFF" | grep -qE "$PATTERNS"; then
+    echo -e "${RED}❌ 疑似 secret 出现在 diff 中:${NC}"
+    echo "$DIFF" | grep -E "$PATTERNS" | head -3
+    exit 1
+fi
+
+# 3. 前端 tsc 增量检查（仅 .ts/.tsx 改动时）
+if git diff --cached --name-only | grep -qE '^frontend-admin/.*\.(tsx|ts)$'; then
+    echo -e "${YEL}→ frontend tsc...${NC}"
+    if ! ( cd frontend-admin && pnpm -s tsc --noEmit ); then
+        echo -e "${RED}❌ frontend tsc 失败${NC}"
+        exit 1
+    fi
+fi
+
+# 4. 后端 mvn compile 增量检查（仅 .java 改动时）
+if git diff --cached --name-only | grep -qE '^backend-api/.*\.java$'; then
+    echo -e "${YEL}→ backend mvn compile...${NC}"
+    if ! ( cd backend-api && JAVA_HOME=/opt/homebrew/opt/openjdk@21 PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH mvn -q -DskipTests compile ); then
+        echo -e "${RED}❌ backend mvn compile 失败${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}✅ pre-commit 通过${NC}"

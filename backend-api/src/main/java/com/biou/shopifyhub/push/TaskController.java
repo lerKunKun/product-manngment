@@ -15,13 +15,16 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -221,6 +224,50 @@ public class TaskController {
         taskMapper.updateById(t);
         log.info("[task-cancel] id={}", id);
         return Result.ok();
+    }
+
+    /**
+     * T22: 任务事件 SSE。轮询 task 表（task 表无 push 通道，无法走 worker 回调），
+     * status 变化时推送一帧。终态（SUCCESS/FAILED/CANCELED/PARTIAL）触发 complete。
+     * 路径已在 SecurityConfig permit。
+     */
+    @GetMapping(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter events(@PathVariable Long id) {
+        SseEmitter emitter = new SseEmitter(30 * 60_000L);
+        Thread t = new Thread(() -> {
+            try {
+                String last = null;
+                while (true) {
+                    Task task = taskMapper.selectById(id);
+                    if (task == null) {
+                        emitter.complete();
+                        return;
+                    }
+                    String cur = task.getStatus() + "|" + (task.getErrorMessage() == null ? "" : task.getErrorMessage());
+                    if (!cur.equals(last)) {
+                        Map<String, Object> data = new HashMap<>();
+                        data.put("status", task.getStatus());
+                        data.put("errorMessage", task.getErrorMessage());
+                        emitter.send(SseEmitter.event().name("task").data(data));
+                        last = cur;
+                    }
+                    if ("SUCCESS".equals(task.getStatus()) || "FAILED".equals(task.getStatus())
+                        || "CANCELED".equals(task.getStatus()) || "PARTIAL".equals(task.getStatus())) {
+                        emitter.complete();
+                        return;
+                    }
+                    Thread.sleep(2000);
+                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                try { emitter.completeWithError(ie); } catch (Exception ignored) {}
+            } catch (Exception e) {
+                try { emitter.completeWithError(e); } catch (Exception ignored) {}
+            }
+        }, "sse-task-" + id);
+        t.setDaemon(true);
+        t.start();
+        return emitter;
     }
 
     // -------------------------------------------------------------- mapping helpers

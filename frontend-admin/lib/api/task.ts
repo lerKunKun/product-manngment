@@ -77,6 +77,8 @@ export const taskApi = {
   retry: (id: number) => api.post<number>(`/task/${id}/retry`),
   /** T19: 取消 PENDING/RUNNING 任务。 */
   cancel: (id: number) => api.post<void>(`/task/${id}/cancel`, null),
+  /** T22: 任务事件 SSE URL（前端 EventSource 使用）。 */
+  eventsUrl: (id: number): string => `/api/task/${id}/events`,
 };
 
 /** T10：后端已实现 POST /task/{id}/retry，可用。 */

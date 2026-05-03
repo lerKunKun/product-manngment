@@ -4,6 +4,8 @@ import com.biou.shopifyhub.auth.sensitive.RequireSensitiveOp;
 import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.store.entity.Store;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -14,10 +16,14 @@ import java.util.Map;
 @RequestMapping("/store")
 public class StoreController {
 
-    private final StoreService service;
+    private static final Logger log = LoggerFactory.getLogger(StoreController.class);
 
-    public StoreController(StoreService service) {
+    private final StoreService service;
+    private final ShopifyApiClient shopify;
+
+    public StoreController(StoreService service, ShopifyApiClient shopify) {
         this.service = service;
+        this.shopify = shopify;
     }
 
     @GetMapping
@@ -102,8 +108,9 @@ public class StoreController {
     }
 
     /**
-     * T10: 简化版店铺健康检查——不真调 Shopify shop.json（避免外部网络依赖），
-     * 仅返回基础状态 + token 是否存在。TODO v1.1 加真 ping。
+     * T22: 真调 Shopify shop.json 健康检查。
+     * 直调路径：backend-api → Shopify Admin API（未走 worker，因当前 worker 未提供 /test/store endpoint）。
+     * 任何异常 → healthy=false + reason，不抛 500。
      */
     @GetMapping("/{id}/test")
     public Result<Map<String, Object>> test(@PathVariable Long id) {
@@ -111,8 +118,31 @@ public class StoreController {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("storeId", s.getId());
         resp.put("status", s.getStatus());
-        resp.put("tokenPresent", s.getEncryptedAccessToken() != null && !s.getEncryptedAccessToken().isBlank());
-        resp.put("healthy", "ACTIVE".equals(s.getStatus()));
+        boolean tokenPresent = s.getEncryptedAccessToken() != null && !s.getEncryptedAccessToken().isBlank();
+        resp.put("tokenPresent", tokenPresent);
+        if (!tokenPresent) {
+            resp.put("healthy", false);
+            resp.put("reason", "店铺无 access_token，无法验证");
+            return Result.ok(resp);
+        }
+        String token;
+        try {
+            token = service.decryptToken(s);
+        } catch (Exception e) {
+            log.warn("[store-test] decrypt token failed id={} err={}", id, e.getMessage());
+            resp.put("healthy", false);
+            resp.put("reason", "Token 解密失败：" + e.getMessage());
+            return Result.ok(resp);
+        }
+        ShopifyApiClient.ShopDetail detail = shopify.fetchShopDetail(s.getMyshopifyDomain(), token);
+        if (!detail.ok()) {
+            resp.put("healthy", false);
+            resp.put("reason", detail.error());
+            return Result.ok(resp);
+        }
+        resp.put("healthy", true);
+        resp.put("shopName", detail.name());
+        resp.put("planName", detail.planName());
         return Result.ok(resp);
     }
 }

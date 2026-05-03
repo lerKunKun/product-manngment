@@ -139,6 +139,22 @@ public class AssetSnapshotController {
         public String snapshotType;
     }
 
+    /**
+     * T22: 取消 PENDING/RUNNING 快照。CANCELED 已通过 V25 加入 asset_snapshot.status 枚举。
+     */
+    @PostMapping("/{id}/cancel")
+    public Result<Void> cancel(@PathVariable Long id) {
+        AssetSnapshot s = snapshotMapper.selectById(id);
+        if (s == null) throw new BusinessException(ResultCode.NOT_FOUND, "snapshot " + id);
+        if (!"PENDING".equals(s.getStatus()) && !"RUNNING".equals(s.getStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "仅 PENDING/RUNNING 可取消，当前 status=" + s.getStatus());
+        }
+        s.setStatus("CANCELED");
+        snapshotMapper.updateById(s);
+        log.info("[asset-snapshot] cancel id={}", id);
+        return Result.ok();
+    }
+
     @GetMapping("/{id}/manifest")
     public Result<Map<String, Object>> manifest(@PathVariable Long id) {
         AssetSnapshot snap = snapshotMapper.selectById(id);

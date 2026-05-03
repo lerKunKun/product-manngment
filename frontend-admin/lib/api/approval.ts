@@ -64,6 +64,12 @@ export const approvalApi = {
   resubmit: (id: number, payload: Record<string, unknown>) =>
     api.post<ApprovalFlow>(`/approval/${id}/resubmit`, { payload }),
   cancel: (id: number) => api.post<ApprovalFlow>(`/approval/${id}/cancel`, null),
+  /** T22: 批量通过审批。单条失败不阻塞，返回 ok/fail 计数 + 失败 ids。 */
+  batchApprove: (flowIds: number[], comment?: string) =>
+    api.post<{ ok: number; fail: number; failedIds: number[] }>("/approval/batch/approve", {
+      flowIds,
+      comment,
+    }),
   myPending: () => api.get<ApprovalFlow[]>("/approval/pending/me"),
 };
 

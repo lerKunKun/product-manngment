@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -14,6 +14,7 @@ import {
   relTime,
   durationOf,
 } from "@/lib/api/task";
+import { useTasks, useInvalidateTasks } from "@/lib/queries/tasks";
 import {
   ErrorBanner,
   LoadingBlock,
@@ -24,12 +25,9 @@ import { useToast } from "@/components/ui/Toast";
 
 /**
  * 任务列表（W2-PUSH-06 + T9 增强）。
- *
- * <p>过滤：type / status / storeId。
- * <p>自动刷新：当前页若有 PENDING / RUNNING 行，每 5s 重拉一次；全部终态后停止。
- * <p>T9：FAILED 行加重试按钮（后端 endpoint 缺失时 disabled）；
- *     parentTaskId=null 行可展开内嵌当前页内的子任务；
- *     toolbar 加 30s 自动刷新 toggle。
+ * 过滤：type / status / storeId。
+ * 自动刷新：当前页若有 PENDING / RUNNING 行，每 5s 重拉一次；全部终态后停止。
+ * T9：FAILED 行加重试；parentTaskId=null 行可展开内嵌当前页内的子任务；toolbar 加 30s 自动刷新 toggle。
  */
 const POLL_INTERVAL_MS = 5000;
 const AUTO_REFRESH_MS = 30000;
@@ -56,79 +54,53 @@ export default function TasksPage() {
   const initialStatus = sp.get("status") ?? "";
   const initialStoreId = sp.get("storeId") ?? "";
 
-  const [records, setRecords] = useState<TaskListItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [size] = useState(20);
   const [type, setType] = useState(initialType);
   const [status, setStatus] = useState(initialStatus);
   const [storeId, setStoreId] = useState(initialStoreId);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [appliedStoreId, setAppliedStoreId] = useState(initialStoreId);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [retrying, setRetrying] = useState<Record<number, boolean>>({});
   const [canceling, setCanceling] = useState<Record<number, boolean>>({});
 
-  const filtersRef = useRef({ page, type, status, storeId });
-  filtersRef.current = { page, type, status, storeId };
+  const storeIdNum = (() => {
+    const t = appliedStoreId.trim();
+    if (!t) return undefined;
+    const n = Number(t);
+    return isNaN(n) ? undefined : n;
+  })();
 
-  const load = useCallback(
-    async (silent = false) => {
-      if (!silent) {
-        setLoading(true);
-        setError(null);
-      }
-      const f = filtersRef.current;
-      try {
-        const params: { type?: string; status?: string; storeId?: number } = {};
-        if (f.type) params.type = f.type;
-        if (f.status) params.status = f.status;
-        if (f.storeId.trim()) {
-          const n = Number(f.storeId);
-          if (!isNaN(n)) params.storeId = n;
-        }
-        const r = await taskApi.list(f.page, size, params);
-        setRecords(r?.records ?? []);
-        setTotal(r?.total ?? 0);
-      } catch (e) {
-        if (!silent) {
-          setError((e as Error).message);
-          setRecords([]);
-          setTotal(0);
-        }
-      } finally {
-        if (!silent) setLoading(false);
-      }
-    },
-    [size]
-  );
+  const queryParams = {
+    page,
+    size,
+    type: type || undefined,
+    status: status || undefined,
+    storeId: storeIdNum,
+  };
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, type, status]);
-
+  // T9: 当前页若有活跃任务每 5s 轮询；用户开 30s 自动刷新时取较快者；都没有则关闭。
+  const { data, isPending, error, refetch } = useTasks(queryParams);
+  const records: TaskListItem[] = data?.records ?? [];
+  const total = data?.total ?? 0;
   const hasActive = records.some((r) => isTaskActive(r.status));
-  useEffect(() => {
-    if (!hasActive) return;
-    const t = window.setInterval(() => load(true), POLL_INTERVAL_MS);
-    return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasActive]);
 
-  // T9: 30s 自动刷新（与上面活跃任务的 5s 轮询独立；可同时跑）
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const t = window.setInterval(() => load(true), AUTO_REFRESH_MS);
-    return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRefresh]);
+  const refetchInterval = hasActive
+    ? POLL_INTERVAL_MS
+    : autoRefresh
+      ? AUTO_REFRESH_MS
+      : (false as const);
+
+  // 第二次调用以应用动态 refetchInterval（同 queryKey 共享缓存）。
+  useTasks(queryParams, { refetchInterval });
+
+  const invalidateTasks = useInvalidateTasks();
 
   function search(e: React.FormEvent) {
     e.preventDefault();
     setPage(1);
-    load();
+    setAppliedStoreId(storeId);
   }
 
   function toggleExpand(id: number) {
@@ -141,7 +113,7 @@ export default function TasksPage() {
     try {
       await taskApi.retry(id);
       toast.success(`#${id} 已重试`);
-      load(true);
+      invalidateTasks();
     } catch (e) {
       toast.error(`重试失败：${(e as Error).message}`);
     } finally {
@@ -156,7 +128,7 @@ export default function TasksPage() {
     try {
       await taskApi.cancel(id);
       toast.success(`#${id} 已取消`);
-      load(true);
+      invalidateTasks();
     } catch (e) {
       toast.error(`取消失败：${(e as Error).message}`);
     } finally {
@@ -164,7 +136,6 @@ export default function TasksPage() {
     }
   }
 
-  // 当前页里 parentTaskId === parentId 的子任务（best-effort，不跨页）
   function childrenOf(parentId: number): TaskListItem[] {
     return records.filter((r) => r.parentTaskId === parentId);
   }
@@ -172,6 +143,8 @@ export default function TasksPage() {
   function hasChildrenInPage(id: number): boolean {
     return records.some((r) => r.parentTaskId === id);
   }
+
+  const errorMsg = error ? (error as Error).message : null;
 
   return (
     <div className="space-y-4">
@@ -236,7 +209,7 @@ export default function TasksPage() {
         </button>
       </form>
 
-      <ErrorBanner message={error} onRetry={() => load()} />
+      <ErrorBanner message={errorMsg} onRetry={() => refetch()} />
 
       <div className="overflow-hidden rounded-lg border">
         <table className="w-full text-sm">
@@ -255,14 +228,14 @@ export default function TasksPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && (
+            {isPending && (
               <tr>
                 <td colSpan={10} className="px-3 py-2">
                   <LoadingBlock />
                 </td>
               </tr>
             )}
-            {!loading && records.length === 0 && (
+            {!isPending && records.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-3 py-2">
                   <EmptyState

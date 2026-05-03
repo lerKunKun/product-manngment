@@ -19,7 +19,7 @@ public class AssetSnapshot {
     /** THEME / POLICY / MENU / COLLECTION / PRODUCT / FULL */
     private String snapshotType;
 
-    /** PENDING / RUNNING / SUCCESS / FAILED */
+    /** PENDING / RUNNING / SUCCESS / FAILED / CANCELED */
     private String status;
 
     private String r2Prefix;

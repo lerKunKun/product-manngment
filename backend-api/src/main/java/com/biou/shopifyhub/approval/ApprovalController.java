@@ -4,6 +4,10 @@ import com.biou.shopifyhub.approval.entity.ApprovalFlow;
 import com.biou.shopifyhub.approval.entity.ApprovalLog;
 import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
+import com.biou.shopifyhub.core.ResultCode;
+import com.biou.shopifyhub.core.exception.BusinessException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -12,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -21,6 +26,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/approval")
 public class ApprovalController {
+
+    private static final Logger log = LoggerFactory.getLogger(ApprovalController.class);
 
     private final ApprovalEngine engine;
 
@@ -83,6 +90,28 @@ public class ApprovalController {
         return Result.ok(engine.pendingFor(CurrentUser.userIdOrThrow()));
     }
 
+    /** T22: 批量通过。逐条调 engine.approve，单条失败不阻塞整体；返回 ok/fail 计数 + 失败 ids。 */
+    @PostMapping("/batch/approve")
+    public Result<Map<String, Object>> batchApprove(@RequestBody BatchApproveBody body) {
+        Long me = CurrentUser.userIdOrThrow();
+        if (body == null || body.flowIds() == null || body.flowIds().isEmpty()) {
+            throw new BusinessException(ResultCode.VALIDATION_FAILED, "flowIds 不能为空");
+        }
+        int ok = 0, fail = 0;
+        List<Long> failedIds = new ArrayList<>();
+        for (Long id : body.flowIds()) {
+            try {
+                engine.approve(id, me, body.comment());
+                ok++;
+            } catch (Exception e) {
+                fail++;
+                failedIds.add(id);
+                log.warn("[approval-batch-approve] flowId={} failed: {}", id, e.getMessage());
+            }
+        }
+        return Result.ok(Map.of("ok", ok, "fail", fail, "failedIds", failedIds));
+    }
+
     public record SubmitBody(
         String type,
         Long applicantId,
@@ -95,6 +124,7 @@ public class ApprovalController {
 
     public record DecisionBody(String comment) {}
     public record ResubmitBody(Map<String, Object> payload) {}
+    public record BatchApproveBody(List<Long> flowIds, String comment) {}
 
     public record ApprovalDetail(ApprovalFlow flow, List<ApprovalLog> logs) {}
 }

@@ -54,6 +54,33 @@ public class ShopifyApiClient {
         }
     }
 
+    /**
+     * T22: 调 shop.json 拿完整 shop 信息（name + plan_name 等）用于健康检查。
+     * 区别于 verifyToken：返回 plan_name；超时更短（8s）。
+     */
+    public ShopDetail fetchShopDetail(String myshopifyDomain, String accessToken) {
+        try {
+            String url = "https://" + myshopifyDomain + "/admin/api/" + apiVersion + "/shop.json";
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .header("X-Shopify-Access-Token", accessToken)
+                .timeout(Duration.ofSeconds(8))
+                .GET().build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                return new ShopDetail(false, resp.statusCode(), null, null, "Shopify HTTP " + resp.statusCode());
+            }
+            JsonNode shop = JSON.readTree(resp.body()).path("shop");
+            return new ShopDetail(true, 200,
+                shop.path("name").asText(null),
+                shop.path("plan_name").asText(null),
+                null);
+        } catch (Exception e) {
+            log.warn("Shopify fetchShopDetail error domain={} err={}", myshopifyDomain, e.getMessage());
+            return new ShopDetail(false, 0, null, null,
+                e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
     /** OAuth code → access_token */
     public TokenExchangeResult exchangeCode(String shop, String code, String apiKey, String apiSecret) {
         try {
@@ -88,4 +115,5 @@ public class ShopifyApiClient {
 
     public record ShopInfo(boolean ok, String name, String error) {}
     public record TokenExchangeResult(boolean ok, String accessToken, String scope, String error) {}
+    public record ShopDetail(boolean ok, int statusCode, String name, String planName, String error) {}
 }
