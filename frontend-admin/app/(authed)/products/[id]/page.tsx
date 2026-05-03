@@ -19,22 +19,32 @@ import { ExternalLinksBar } from "./_components/ExternalLinksBar";
 import { MediaSection } from "./_components/MediaSection";
 import { VariantsTable } from "./_components/VariantsTable";
 import { RightPanel } from "./_components/RightPanel";
+import { DocsTab } from "./_components/DocsTab";
+import { PurchaseTab } from "@/components/product/PurchaseTab";
+import { StoreMappingPanel } from "@/components/product/StoreMappingPanel";
+import { ProductHistoryTabs } from "@/components/product/ProductHistoryTabs";
 
 const inp =
   "w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+
+type SubTab = "purchase" | "docs" | "mapping" | "snapshotHistory" | "pushHistory";
+const SUB_TABS: { k: SubTab; label: string }[] = [
+  { k: "purchase", label: "采购信息" },
+  { k: "docs", label: "媒体/需求文档" },
+  { k: "mapping", label: "店铺映射" },
+  { k: "snapshotHistory", label: "快照历史" },
+  { k: "pushHistory", label: "推送历史" },
+];
 
 /**
  * Shopify 化产品详情页：
  * - 顶部 breadcrumb + 标题 + 主操作（保存 / 推送 / 快照 / 预览）
  * - 顶部下方：外部链接 chips bar
  * - 主体两栏：
- *   - 左 ~70%：标题、描述、媒体、变体、SEO
+ *   - 左 ~70%：标题、描述、媒体、变体、SEO + 底部二级 tab（采购/文档/映射/快照历史/推送历史）
  *   - 右 ~30%：Status / Organization / Metafields
  *
- * 旧 tab 切换（基础 / 变体 / 图片 / 链接 / 采购 / 文档 / 映射 / SEO / 历史）已合并：
- * - 变体 + 图片合并到主区
- * - 链接放顶部 chips
- * - 采购 / 媒体文档 / 店铺映射 / 历史 → Wave 后续单独 sub-route（/products/[id]/purchase 等）
+ * 用户原诉求只是「变体 + 图片合并到主区、外部链接置顶」，其他 tab 必须保留。
  */
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
@@ -47,6 +57,7 @@ export default function ProductDetailPage() {
   const [msg, setMsg] = useState("");
   const [snapshotOpen, setSnapshotOpen] = useState(false);
   const [pushOpen, setPushOpen] = useState(false);
+  const [subTab, setSubTab] = useState<SubTab>("purchase");
 
   // 编辑中的草稿（commit 一次到后端）
   const [draft, setDraft] = useState<Product | null>(null);
@@ -234,6 +245,38 @@ export default function ProductDetailPage() {
                 rows={3}
                 className={inp}
               />
+            </div>
+          </section>
+
+          {/* 二级 tab：采购信息 / 媒体文档 / 店铺映射 / 快照历史 / 推送历史 */}
+          <section className="rounded-lg border bg-background">
+            <div className="flex flex-wrap gap-1 border-b px-2 py-1.5 text-sm">
+              {SUB_TABS.map((t) => (
+                <button
+                  key={t.k}
+                  type="button"
+                  onClick={() => setSubTab(t.k)}
+                  className={
+                    "rounded px-3 py-1.5 transition-colors " +
+                    (subTab === t.k
+                      ? "bg-primary/10 font-medium text-primary"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground")
+                  }
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="p-4">
+              {subTab === "purchase" && <PurchaseTab productId={id} />}
+              {subTab === "docs" && <DocsTab productId={id} />}
+              {subTab === "mapping" && <StoreMappingPanel productId={id} />}
+              {subTab === "snapshotHistory" && (
+                <ProductHistoryTabs productId={id} initialTab="snapshot" />
+              )}
+              {subTab === "pushHistory" && (
+                <ProductHistoryTabs productId={id} initialTab="push" />
+              )}
             </div>
           </section>
         </div>
