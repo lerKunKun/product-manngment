@@ -44,20 +44,29 @@ export function SensitiveActionDialog({
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [sent, setSent] = useState(false);
+  const [devFallback, setDevFallback] = useState(false);
 
   function reset() {
     setCode("");
     setSent(false);
     setSending(false);
     setVerifying(false);
+    setDevFallback(false);
   }
 
   async function sendCode() {
     setSending(true);
     try {
-      await authApi.sendSensitiveCode(action);
+      const resp = await authApi.sendSensitiveCode(action);
       setSent(true);
-      toast.success(t("sensitiveCode.sent"));
+      // dev fallback：钉钉没发出，码只打到后端日志（生产 devFallback 永远 false）
+      const isFallback = !!resp?.devFallback;
+      setDevFallback(isFallback);
+      if (isFallback) {
+        toast.warn(t("sensitiveCode.devFallback"));
+      } else {
+        toast.success(t("sensitiveCode.sent"));
+      }
     } catch {
       /* 全局 toast */
     } finally {
@@ -130,12 +139,18 @@ export function SensitiveActionDialog({
             {sending && <Spinner />}
             {sent ? t("sensitiveCode.resend") : t("sensitiveCode.send")}
           </button>
-          {sent && (
+          {sent && !devFallback && (
             <span className="ml-2 text-xs text-muted-foreground">
               {t("sensitiveCode.sentHint")}
             </span>
           )}
         </div>
+
+        {sent && devFallback && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {t("sensitiveCode.devFallback")}
+          </div>
+        )}
 
         <div>
           <label className="mb-1 block text-xs text-muted-foreground">

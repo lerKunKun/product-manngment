@@ -9,11 +9,13 @@ import com.biou.shopifyhub.org.dingtalk.DingTalkConfigService;
 import com.biou.shopifyhub.org.dingtalk.DingTalkResolvedConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -42,19 +44,25 @@ public class SensitiveOpService {
     private final SysUserMapper userMapper;
     private final DingTalkApiClient dingTalk;
     private final DingTalkConfigService configService;
+    private final Environment env;
 
     public SensitiveOpService(StringRedisTemplate redis,
                               SysUserMapper userMapper,
                               DingTalkApiClient dingTalk,
-                              DingTalkConfigService configService) {
+                              DingTalkConfigService configService,
+                              Environment env) {
         this.redis = redis;
         this.userMapper = userMapper;
         this.dingTalk = dingTalk;
         this.configService = configService;
+        this.env = env;
     }
 
-    /** 发码：生成 6 位随机码 + Redis 缓存 + 钉钉工作通知。 */
-    public void requestCode(Long userId, String action) {
+    /**
+     * 发码：生成 6 位随机码 + Redis 缓存 + 钉钉工作通知。
+     * 返回 true 表示钉钉发送成功；false 表示进入了 dev fallback（码已写 redis 且 log 打印，前端按 fallback 提示）。
+     */
+    public boolean requestCode(Long userId, String action) {
         if (userId == null) throw new BusinessException(ResultCode.UNAUTHORIZED);
         SysUser u = userMapper.selectById(userId);
         if (u == null) throw new BusinessException(ResultCode.NOT_FOUND, "用户不存在");
@@ -68,44 +76,58 @@ public class SensitiveOpService {
             action, code
         );
 
-        boolean sent = sendViaResolvedConfig(u, text);
-        if (!sent) {
-            // 钉钉不可达时，本地日志（dev 阶段）方便测试；生产可改邮件兜底
-            log.warn("[sensitive-op] 钉钉发码失败，本地降级日志：userId={} action={} code={}",
-                userId, action, code);
+        SendOutcome outcome = sendViaResolvedConfig(u, text);
+        if (outcome.sent()) {
+            return true;
         }
+        // 钉钉不可达 → dev fallback：把码打到日志（仅 non-prod 打明文！）
+        boolean isProd = Arrays.asList(env.getActiveProfiles()).contains("prod");
+        long ttl = CODE_TTL.toSeconds();
+        if (isProd) {
+            log.warn("[sensitive-op] 钉钉发码失败 userId={} action={} code=*** ttl={}s reason={}",
+                userId, action, ttl, outcome.reason());
+        } else {
+            log.warn("[DEV-FALLBACK] 敏感操作验证码 userId={} action={} code={} ttl={}s — 钉钉未发出，原因：{}",
+                userId, action, code, ttl, outcome.reason());
+        }
+        return false;
     }
 
     /**
      * 优先按 user.defaultTenantId 解析组织级配置 + corp-specific send；
      * 解析不到 → fallback env（dingTalk.sendTextToUser）。
+     * 返回 SendOutcome：sent=true/false + reason（fallback 时给前端 + log 用）。
      */
-    private boolean sendViaResolvedConfig(SysUser u, String text) {
+    private SendOutcome sendViaResolvedConfig(SysUser u, String text) {
         String dingUserId = u.getDingtalkUserid();
         if (dingUserId == null || dingUserId.isBlank()) {
             log.warn("[sensitive-op] user.dingtalkUserid 缺失 userId={}，无法发码", u.getId());
-            return false;
+            return new SendOutcome(false, "user.dingtalkUserid 缺失");
         }
         try {
             DingTalkResolvedConfig cfg = configService.resolveByTenantId(u.getDefaultTenantId());
             if (!cfg.isConfigured()) {
                 log.warn("[sensitive-op] 钉钉未配置 userId={} tenantId={} source={}",
                     u.getId(), u.getDefaultTenantId(), cfg.source());
-                return false;
+                return new SendOutcome(false, "钉钉未配置 (source=" + cfg.source() + ")");
             }
+            boolean ok;
             if (cfg.source() == DingTalkResolvedConfig.Source.DB) {
-                return dingTalk.sendTextWorkNotificationForCorp(
+                ok = dingTalk.sendTextWorkNotificationForCorp(
                     cfg.corpId(), cfg.agentId(), cfg.appKey(), cfg.appSecret(),
                     List.of(dingUserId), text
                 );
+            } else {
+                ok = dingTalk.sendTextToUser(dingUserId, text);
             }
-            // env fallback
-            return dingTalk.sendTextToUser(dingUserId, text);
+            return ok ? new SendOutcome(true, null) : new SendOutcome(false, "钉钉接口返回失败");
         } catch (Exception e) {
             log.error("[sensitive-op] 钉钉发送异常 userId={} err={}", u.getId(), e.getMessage(), e);
-            return false;
+            return new SendOutcome(false, "钉钉接口异常: " + e.getMessage());
         }
     }
+
+    private record SendOutcome(boolean sent, String reason) {}
 
     /** 用 6 位码换 token。 */
     public String verify(Long userId, String action, String code) {

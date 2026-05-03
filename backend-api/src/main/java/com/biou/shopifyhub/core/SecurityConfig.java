@@ -67,6 +67,9 @@ public class SecurityConfig {
                 .requestMatchers("/health/**", "/actuator/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/auth/login", "/auth/logout", "/auth/refresh").permitAll()
                 .requestMatchers("/auth/dingtalk/qrcode", "/auth/dingtalk/callback", "/auth/dingtalk/event").permitAll()
+                // /auth/dingtalk/bind/qrcode 必须**已登录**才能发起 → 不加 permitAll
+                // /auth/dingtalk/bind/callback 由钉钉浏览器跳转回来，无 Authorization header → permitAll，靠 state HMAC 防伪
+                .requestMatchers("/auth/dingtalk/bind/callback").permitAll()
                 .requestMatchers("/auth/password-reset/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/invitation/preview", "/asset/snapshot/*/events", "/saga/*/events", "/task/*/events").permitAll()
                 .requestMatchers(HttpMethod.POST, "/invitation/accept").permitAll()

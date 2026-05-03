@@ -2,10 +2,14 @@ package com.biou.shopifyhub.auth.dingtalk;
 
 import com.biou.shopifyhub.auth.dto.LoginResult;
 import com.biou.shopifyhub.auth.service.DingTalkLoginService;
+import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.core.ResultCode;
+import com.biou.shopifyhub.core.entity.SysUser;
 import com.biou.shopifyhub.core.exception.BusinessException;
+import com.biou.shopifyhub.core.mapper.SysUserMapper;
 import com.biou.shopifyhub.core.security.CookieUtil;
+import com.biou.shopifyhub.core.tenant.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -39,6 +43,8 @@ public class DingTalkAuthController {
     private final DingTalkClient client;
     private final DingTalkStateService stateService;
     private final DingTalkLoginService loginService;
+    private final DingTalkBindService bindService;
+    private final SysUserMapper userMapper;
     private final CookieUtil cookieUtil;
 
     @Value("${dingtalk.qr-connect-url:https://login.dingtalk.com/oauth2/auth}")
@@ -46,6 +52,9 @@ public class DingTalkAuthController {
 
     @Value("${dingtalk.redirect-uri:http://localhost:8080/api/auth/dingtalk/callback}")
     private String redirectUri;
+
+    @Value("${dingtalk.bind-redirect-uri:http://localhost:8080/api/auth/dingtalk/bind/callback}")
+    private String bindRedirectUri;
 
     @Value("${dingtalk.frontend-redirect:http://localhost:3000}")
     private String frontendRedirect;
@@ -55,12 +64,16 @@ public class DingTalkAuthController {
         DingTalkClient client,
         DingTalkStateService stateService,
         DingTalkLoginService loginService,
+        DingTalkBindService bindService,
+        SysUserMapper userMapper,
         CookieUtil cookieUtil
     ) {
         this.props = props;
         this.client = client;
         this.stateService = stateService;
         this.loginService = loginService;
+        this.bindService = bindService;
+        this.userMapper = userMapper;
         this.cookieUtil = cookieUtil;
     }
 
@@ -107,6 +120,78 @@ public class DingTalkAuthController {
         // refresh 进 httpOnly cookie；access 也不再放 URL — 前端进 success 页后调 /auth/refresh 凭 cookie 拿新 access
         cookieUtil.writeRefresh(response, result.refreshToken());
         response.sendRedirect(frontendRedirect + "/login/dingtalk-success");
+    }
+
+    // ==========================================================================
+    // 个人中心「绑定钉钉」专用流程（与上面登录流程隔离）
+    // 关键差异：bindCallback **不**走 loginOrRegister；只把 dingtalk_* 字段
+    //          写入当前已登录用户。state 中携带 currentUserId，回调凭 state 识别。
+    // 安全：/bind/qrcode 必须已登录；/bind/callback 走 permitAll 但靠 state HMAC 防伪。
+    // ==========================================================================
+
+    @GetMapping("/bind/qrcode")
+    public Result<Map<String, String>> bindQrcode() {
+        ensureConfigured();
+        Long userId = CurrentUser.userIdOrThrow();
+        Long tenantId = TenantContext.tenantId();
+        String state = bindService.issueBindState(userId, tenantId);
+        String url = qrConnectUrl
+            + "?response_type=code"
+            + "&client_id=" + enc(props.getMainAppKey())
+            + "&scope=openid+corpid"
+            + "&prompt=consent"
+            + "&corpId=" + enc(props.getMainCorpId())
+            + "&redirect_uri=" + enc(bindRedirectUri)
+            + "&state=" + enc(state);
+        return Result.ok(Map.of("oauthUrl", url, "state", state));
+    }
+
+    @GetMapping("/bind/callback")
+    public void bindCallback(
+        @RequestParam(value = "authCode", required = false) String authCode,
+        @RequestParam(value = "code", required = false) String codeAlias,
+        @RequestParam String state,
+        HttpServletRequest request,
+        HttpServletResponse response
+    ) throws IOException {
+        try {
+            ensureConfigured();
+            DingTalkStateService.BindStateData std = stateService.verifyBind(state);
+            String code = authCode != null ? authCode : codeAlias;
+            if (code == null || code.isBlank()) {
+                throw new BusinessException(ResultCode.BAD_REQUEST, "callback 缺 authCode");
+            }
+
+            DingTalkClient.DingTalkAccessToken tok = client.exchangeUserToken(code);
+            DingTalkClient.DingTalkUser dtUser = client.getMe(tok.accessToken());
+            log.info("[dingtalk-bind-callback] userId={} unionId={} nick={}",
+                std.userId(), dtUser.unionId(), dtUser.nick());
+
+            String ip = request.getHeader("X-Forwarded-For");
+            if (ip == null || ip.isBlank()) ip = request.getRemoteAddr();
+            else ip = ip.split(",")[0].trim();
+            String ua = request.getHeader("User-Agent");
+
+            // 解出 dingUserId/corpId（非致命：失败也允许只写 unionId）
+            SysUser current = userMapper.selectById(std.userId());
+            if (current == null) {
+                throw new BusinessException(ResultCode.NOT_FOUND, "当前用户不存在");
+            }
+            DingTalkBindService.ResolvedDingUser resolved =
+                bindService.tryResolveDingUser(current, dtUser.unionId());
+
+            bindService.bind(std.userId(), dtUser.unionId(),
+                resolved.dingUserId(), resolved.corpId(), ip, ua);
+
+            response.sendRedirect(frontendRedirect + "/profile?bound=1");
+        } catch (BusinessException be) {
+            log.warn("[dingtalk-bind-callback] failed code={} msg={}", be.code().code(), be.getMessage());
+            String msg = be.detail() != null && !be.detail().isBlank() ? be.detail() : be.code().message();
+            response.sendRedirect(frontendRedirect + "/profile?error=" + enc(msg));
+        } catch (Exception e) {
+            log.error("[dingtalk-bind-callback] unexpected error", e);
+            response.sendRedirect(frontendRedirect + "/profile?error=" + enc("bind_failed"));
+        }
     }
 
     @PostMapping("/event")

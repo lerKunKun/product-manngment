@@ -17,9 +17,9 @@ public class SensitiveOpController {
     }
 
     @PostMapping("/auth/sensitive/request")
-    public Result<Void> request(@RequestBody RequestCodePayload body) {
-        service.requestCode(CurrentUser.userIdOrThrow(), body.action);
-        return Result.ok();
+    public Result<Map<String, Object>> request(@RequestBody RequestCodePayload body) {
+        boolean sent = service.requestCode(CurrentUser.userIdOrThrow(), body.action);
+        return Result.ok(Map.of("devFallback", !sent));
     }
 
     @PostMapping("/auth/sensitive/verify")
@@ -30,9 +30,10 @@ public class SensitiveOpController {
 
     /** F4 别名路径（与文档 /auth/sensitive-code/* 对齐）。 */
     @PostMapping("/auth/sensitive-code/send")
-    public Result<Void> sendCode(@RequestBody RequestCodePayload body) {
-        service.requestCode(CurrentUser.userIdOrThrow(), body.action);
-        return Result.ok();
+    public Result<Map<String, Object>> sendCode(@RequestBody RequestCodePayload body) {
+        boolean sent = service.requestCode(CurrentUser.userIdOrThrow(), body.action);
+        // devFallback=true 表示钉钉没发出，dev 模式下码已打到后端控制台
+        return Result.ok(Map.of("devFallback", !sent));
     }
 
     @PostMapping("/auth/sensitive-code/verify")

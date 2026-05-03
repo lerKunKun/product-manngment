@@ -271,6 +271,8 @@ export const messages = {
     "profile.userType.full": "正式员工",
     "profile.dingtalk.bound": "已绑定",
     "profile.dingtalk.unbound": "未绑定",
+    "profile.dingtalk.boundOk": "✓ 钉钉已关联",
+    "profile.dingtalk.bindFailed": "绑定失败：{reason}",
     "profile.passwordMustChangeWarn": "⚠ 检测到您使用初始/临时密码，请立即在下方修改。",
     "profile.changePassword": "修改密码",
     "profile.password.old": "原密码",
@@ -433,6 +435,7 @@ export const messages = {
     "sensitiveCode.codeLabel": "6 位验证码",
     "sensitiveCode.codeRequired": "请输入验证码",
     "sensitiveCode.confirm": "确认",
+    "sensitiveCode.devFallback": "dev 模式：码已打印到后端控制台（查看 mvn 终端）",
   },
   "en-US": {
     "common.save": "Save",
@@ -706,6 +709,8 @@ export const messages = {
     "profile.userType.full": "Full Employee",
     "profile.dingtalk.bound": "Bound",
     "profile.dingtalk.unbound": "Not bound",
+    "profile.dingtalk.boundOk": "✓ DingTalk linked",
+    "profile.dingtalk.bindFailed": "Bind failed: {reason}",
     "profile.passwordMustChangeWarn": "You are using an initial / temporary password. Please change it below immediately.",
     "profile.changePassword": "Change Password",
     "profile.password.old": "Current Password",
@@ -868,6 +873,7 @@ export const messages = {
     "sensitiveCode.codeLabel": "6-digit code",
     "sensitiveCode.codeRequired": "Please enter the code",
     "sensitiveCode.confirm": "Confirm",
+    "sensitiveCode.devFallback": "Dev mode: code printed to backend console (check the mvn terminal)",
   },
 } as const;
 

@@ -13,9 +13,11 @@ import {
   type NotificationSubscription,
 } from "@/lib/api/notification";
 import { useI18n } from "@/lib/i18n/context";
+import { useToast } from "@/components/ui/Toast";
 
 export default function ProfilePage() {
   const { t } = useI18n();
+  const toast = useToast();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -40,6 +42,27 @@ export default function ProfilePage() {
 
   useEffect(() => {
     load();
+  }, []);
+
+  // 钉钉绑定回调：?bound=1 / ?error=...
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const bound = url.searchParams.get("bound");
+    const err = url.searchParams.get("error");
+    if (!bound && !err) return;
+
+    if (bound === "1") {
+      toast.success(t("profile.dingtalk.boundOk"));
+      load();
+    } else if (err) {
+      toast.error(t("profile.dingtalk.bindFailed").replace("{reason}", err));
+    }
+    // 清掉 query，避免刷新重复触发
+    url.searchParams.delete("bound");
+    url.searchParams.delete("error");
+    window.history.replaceState({}, "", url.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function changePwd(e: React.FormEvent) {
@@ -76,7 +99,8 @@ export default function ProfilePage() {
 
   async function bindDingtalk() {
     try {
-      const r = await authApi.dingtalkQrcode();
+      // 用专用 bind 接口，**不**走登录路径（避免切换账号）
+      const r = await authApi.dingtalkBindQrcode();
       window.location.href = r.oauthUrl;
     } catch (e) {
       setError((e as ApiError).message);

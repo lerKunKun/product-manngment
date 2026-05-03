@@ -49,9 +49,17 @@ export const authApi = {
       `/auth/dingtalk/qrcode${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`
     ),
 
-  /** F4：发送敏感操作钉钉验证码（按当前用户的钉钉配置发） */
+  /**
+   * 个人中心「绑定钉钉」专用：返回的 oauthUrl 跳钉钉 → 钉钉跳回
+   * /auth/dingtalk/bind/callback（与登录回调隔离），后端不会切换账号，
+   * 只把 unionId/userId/corpId 写入当前登录用户。
+   */
+  dingtalkBindQrcode: () =>
+    api.get<{ oauthUrl: string; state: string }>("/auth/dingtalk/bind/qrcode"),
+
+  /** F4：发送敏感操作钉钉验证码（按当前用户的钉钉配置发）。devFallback=true 表示钉钉没发出，dev 模式下码已打到后端控制台。 */
   sendSensitiveCode: (action: string) =>
-    api.post<void>("/auth/sensitive-code/send", { action }),
+    api.post<{ devFallback?: boolean }>("/auth/sensitive-code/send", { action }),
   /** F4：核对验证码 → 拿到一次性 sensitiveToken（5min 有效） */
   verifySensitiveCode: (action: string, code: string) =>
     api.post<{ sensitiveToken: string; ttl: string }>(

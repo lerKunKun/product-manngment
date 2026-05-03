@@ -169,6 +169,38 @@ public class DingTalkApiClient {
     }
 
     /**
+     * 通过 unionId 反查该 corp 下的 userId。
+     * 文档：https://open.dingtalk.com/document/orgapp/query-a-user-by-the-union-id
+     * 命中返回 userid，未命中或 errcode=60121（用户不在该企业）返回 null。
+     */
+    public String getUserIdByUnionId(String accessToken, String unionId) {
+        if (accessToken == null || accessToken.isBlank() || unionId == null || unionId.isBlank()) {
+            return null;
+        }
+        try {
+            String url = "https://oapi.dingtalk.com/topapi/user/getbyunionid?access_token=" + accessToken;
+            String json = JSON.writeValueAsString(Map.of("unionid", unionId));
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(8))
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            JsonNode n = JSON.readTree(resp.body());
+            int errcode = n.path("errcode").asInt(-1);
+            if (errcode == 0) {
+                return n.path("result").path("userid").asText(null);
+            }
+            // 60121: 该 unionId 不在此企业 — 不算硬错误
+            log.warn("DingTalk getbyunionid not-found errcode={} body={}", errcode, resp.body());
+            return null;
+        } catch (Exception e) {
+            log.error("DingTalk getbyunionid error unionId={}", unionId, e);
+            return null;
+        }
+    }
+
+    /**
      * 用指定 corp 的 token + agent 发工作通知。userIds = 该 corp 下的钉钉 userId。
      */
     public boolean sendTextWorkNotificationForCorp(String corpId, String agentId, String appKey,
