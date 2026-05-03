@@ -7,6 +7,7 @@ import { useAuthStore } from "@/lib/auth/store";
 import { relTime } from "@/lib/api/task";
 import { notificationLogApi, type NotificationLog } from "@/lib/api/notificationLog";
 import { useDashboardKpis, useFailedTasks } from "@/lib/queries/dashboard";
+import { useI18n } from "@/lib/i18n/context";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Badge } from "@/components/ui/Badge";
@@ -15,6 +16,7 @@ import { EmptyState } from "@/components/ui/StatusBlocks";
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
+  const { t } = useI18n();
 
   const { products, storesActive, tasksToday, approvalsPending } = useDashboardKpis();
   const failedTasks = useFailedTasks();
@@ -46,10 +48,10 @@ export default function DashboardPage() {
   }, []);
 
   const cards = [
-    { title: "产品总数", q: products, href: "/products" },
-    { title: "在线店铺数", q: storesActive, href: "/stores" },
-    { title: "今日推送任务", q: tasksToday, href: "/tasks" },
-    { title: "待办审批", q: approvalsPending, href: "/approvals" },
+    { title: t("dashboard.totalProducts"), q: products, href: "/products" },
+    { title: t("dashboard.activeStores"), q: storesActive, href: "/stores" },
+    { title: t("dashboard.todayPushes"), q: tasksToday, href: "/tasks" },
+    { title: t("dashboard.pendingApprovals"), q: approvalsPending, href: "/approvals" },
   ];
 
   const failed = failedTasks.data ?? [];
@@ -84,7 +86,7 @@ export default function DashboardPage() {
 
       <section className="rounded-lg border bg-background">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
-          <h2 className="text-sm font-semibold">24 小时通知发送</h2>
+          <h2 className="text-sm font-semibold">{t("dashboard.notificationsLast24h")}</h2>
         </div>
         <div className="p-4">
           {notifLoading ? (
@@ -99,7 +101,7 @@ export default function DashboardPage() {
 
       <section className="rounded-lg border bg-background">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
-          <h2 className="text-sm font-semibold">最近 5 个失败任务</h2>
+          <h2 className="text-sm font-semibold">{t("dashboard.recentFailedTasks")}</h2>
           <Link
             href="/tasks?status=FAILED"
             className="text-xs text-muted-foreground hover:text-foreground"

@@ -176,3 +176,79 @@ jobs:
       - name: Backend log on failure
         if: failure()
         run: tail -300 /tmp/backend.log || true
+
+  e2e-frontend:
+    name: E2E Frontend (Playwright)
+    needs: [frontend, backend]
+    runs-on: ubuntu-latest
+    continue-on-error: true   # 避免 block 主 CI（首次试点）
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: shopifyhub
+          MYSQL_USER: shopifyhub
+          MYSQL_PASSWORD: shopifyhub_dev_pass
+        ports: ['3307:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -proot"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:8-alpine
+        ports: ['6380:6379']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: 'frontend-admin/pnpm-lock.yaml'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Install frontend deps
+        run: cd frontend-admin && pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: cd frontend-admin && pnpm exec playwright install --with-deps chromium
+
+      - name: Build & start backend
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3307
+          MYSQL_USER: shopifyhub
+          MYSQL_PASSWORD: shopifyhub_dev_pass
+          MYSQL_PLATFORM_DB: shopifyhub
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6380
+        run: |
+          cd backend-api
+          mvn -B -DskipTests -q clean package
+          nohup java -jar target/*.jar > /tmp/backend.log 2>&1 &
+          for i in {1..60}; do curl -fsS http://localhost:8080/api/health 2>/dev/null && break; sleep 2; done
+
+      - name: Build & start frontend
+        run: |
+          cd frontend-admin
+          pnpm build
+          nohup pnpm start > /tmp/frontend.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://localhost:3000 2>/dev/null && break; sleep 2; done
+
+      - name: Run Playwright
+        env:
+          CI: 'true'
+          PLAYWRIGHT_BASE_URL: 'http://localhost:3000'
+        run: cd frontend-admin && pnpm test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend-admin/playwright-report/
+          retention-days: 7

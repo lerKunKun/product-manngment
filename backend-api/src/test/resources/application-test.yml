@@ -1,0 +1,114 @@
+spring:
+  datasource:
+    dynamic:
+      primary: platform
+      strict: false
+      datasource:
+        platform:
+          url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_PLATFORM_DB:platform}?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+          username: ${MYSQL_USER:root}
+          password: ${MYSQL_PASSWORD:root}
+          driver-class-name: com.mysql.cj.jdbc.Driver
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_PLATFORM_DB:platform}?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+    user: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:#{null}}
+      timeout: 5s
+
+  rabbitmq:
+    host: ${MQ_HOST:localhost}
+    port: ${MQ_PORT:5672}
+    username: ${MQ_USER:guest}
+    password: ${MQ_PASS:guest}
+
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:25}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deletedAt
+      logic-not-delete-value: 'null'
+      logic-delete-value: 'NOW()'
+
+r2:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: shopify-assets-test
+  public-base: http://localhost:9000/shopify-assets-test
+  region: auto
+
+jwt:
+  private-key:
+  public-key:
+  access-ttl: 30m
+  refresh-ttl: 7d
+  issuer: shopify-hub-test
+
+invitation:
+  link-base: http://localhost:3000/invitation/accept
+  link-ttl-hours: 48
+  max-account-days: 90
+  token-secret: test-invitation-secret
+  expiry-check-cron: "0 0 * * * *"
+  reminder-cron: "0 0 9 * * *"
+
+dingtalk:
+  main-corp-id:
+  main-agent-id:
+  main-app-key:
+  main-app-secret:
+  event-token:
+  event-aes-key:
+
+shopify:
+  webhook:
+    secret:
+  snapshot:
+    debounce-seconds: 300
+  worker:
+    base-url: http://localhost:8765
+    call-timeout-seconds: 120
+  sync:
+    full-cron: "0 0 4 * * *"
+  theme:
+    publish-after-install: false
+  oauth:
+    callback-base: http://localhost:8080/api
+    saga-frontend-base: http://localhost:3000/newstore
+  dev-mock-oauth: true
+
+rbac:
+  cross-auth:
+    expiry-warn-cron: "0 0 * * * *"
+    expire-cron: "0 5 0 * * *"
+
+preview:
+  max-per-dev-store: 3
+  ttl-hours: 24
+  cleanup-cron: "0 */30 * * * *"
+
+cache:
+  enabled: false
+  default-ttl-seconds: 300
+
+logging:
+  level:
+    com.biou.shopifyhub: INFO
+    org.springframework.security: WARN

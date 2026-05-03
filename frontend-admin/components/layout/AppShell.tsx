@@ -6,77 +6,85 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/auth/store";
 import { authApi } from "@/lib/api/auth";
 import { useUnreadInboxCount } from "@/lib/queries/inbox";
+import { useI18n } from "@/lib/i18n/context";
+import type { MessageKey } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetHeader, SheetTitle, SheetContent } from "@/components/ui/Sheet";
 
-const NAV_GROUPS: {
+type NavGroup = {
   section: string | null;
   items: { href: string; label: string }[];
-}[] = [
-  { section: null, items: [{ href: "/dashboard", label: "首页" }] },
-  {
-    section: "业务",
-    items: [
-      { href: "/products", label: "产品库" },
-      { href: "/stores", label: "店铺管理" },
-      { href: "/partner-stores", label: "合作者店铺池" },
-      { href: "/newstore", label: "一键开店" },
-    ],
-  },
-  {
-    section: "资产",
-    items: [
-      { href: "/assets", label: "资产快照" },
-      { href: "/snapshots", label: "产品快照" },
-      { href: "/templates", label: "模板库" },
-    ],
-  },
-  {
-    section: "流程",
-    items: [
-      { href: "/approvals", label: "审批中心" },
-      { href: "/invitations", label: "临时员工邀请" },
-      { href: "/cross-auth", label: "跨公司授权" },
-    ],
-  },
-  {
-    section: "我的",
-    items: [
-      { href: "/inbox", label: "通知中心" },
-      { href: "/profile", label: "个人中心" },
-    ],
-  },
-  {
-    section: "工具",
-    items: [
-      { href: "/tasks", label: "任务监控" },
-      { href: "/recyclebin", label: "回收站" },
-      { href: "/guides", label: "指导文档" },
-    ],
-  },
-  {
-    section: "系统",
-    items: [
-      { href: "/orgs", label: "组织管理" },
-      { href: "/admin/role", label: "角色管理" },
-      { href: "/admin/datasources", label: "数据源" },
-      { href: "/admin/notification-log", label: "通知日志" },
-      { href: "/admin/audit-log", label: "审计日志" },
-      { href: "/admin/ops", label: "备份归档" },
-    ],
-  },
-];
+};
+
+function getNavGroups(t: (k: MessageKey) => string): NavGroup[] {
+  return [
+    { section: null, items: [{ href: "/dashboard", label: t("nav.home") }] },
+    {
+      section: t("nav.business"),
+      items: [
+        { href: "/products", label: t("nav.products") },
+        { href: "/stores", label: t("nav.stores") },
+        { href: "/partner-stores", label: t("nav.partner-stores") },
+        { href: "/newstore", label: t("nav.newstore") },
+      ],
+    },
+    {
+      section: t("nav.assets"),
+      items: [
+        { href: "/assets", label: t("nav.assets-snapshot") },
+        { href: "/snapshots", label: t("nav.snapshots") },
+        { href: "/templates", label: t("nav.templates") },
+      ],
+    },
+    {
+      section: t("nav.flow"),
+      items: [
+        { href: "/approvals", label: t("nav.approvals") },
+        { href: "/invitations", label: t("nav.invitations") },
+        { href: "/cross-auth", label: t("nav.cross-auth") },
+      ],
+    },
+    {
+      section: t("nav.my"),
+      items: [
+        { href: "/inbox", label: t("nav.inbox") },
+        { href: "/profile", label: t("nav.profile") },
+      ],
+    },
+    {
+      section: t("nav.tools"),
+      items: [
+        { href: "/tasks", label: t("nav.tasks") },
+        { href: "/recyclebin", label: t("nav.recyclebin") },
+        { href: "/guides", label: t("nav.guides") },
+      ],
+    },
+    {
+      section: t("nav.system"),
+      items: [
+        { href: "/orgs", label: t("nav.orgs") },
+        { href: "/admin/role", label: t("nav.role") },
+        { href: "/admin/datasources", label: t("nav.datasources") },
+        { href: "/admin/notification-log", label: t("nav.notification-log") },
+        { href: "/admin/audit-log", label: t("nav.audit-log") },
+        { href: "/admin/ops", label: t("nav.ops") },
+      ],
+    },
+  ];
+}
 
 function NavList({
   pathname,
+  navGroups,
   onLinkClick,
 }: {
   pathname: string;
+  navGroups: NavGroup[];
   onLinkClick?: () => void;
 }) {
   return (
     <nav className="space-y-4">
-      {NAV_GROUPS.map((g, gi) => (
+      {navGroups.map((g, gi) => (
         <div key={gi} className="space-y-0.5">
           {g.section && (
             <div className="px-3 pb-1 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -115,8 +123,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const clear = useAuthStore((s) => s.clear);
   const { data: unreadResp } = useUnreadInboxCount();
   const unread = unreadResp?.count ?? 0;
+  const { locale, setLocale, t } = useI18n();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const navGroups = getNavGroups(t);
 
   useEffect(() => {
     setTheme(
@@ -152,7 +163,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="text-sm font-semibold">Biou × Shopify Hub</div>
           <div className="text-xs text-muted-foreground">v0.1.0-alpha</div>
         </div>
-        <NavList pathname={pathname} />
+        <NavList pathname={pathname} navGroups={navGroups} />
       </aside>
       <Sheet
         open={mobileNavOpen}
@@ -165,6 +176,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <SheetContent>
           <NavList
             pathname={pathname}
+            navGroups={navGroups}
             onLinkClick={() => setMobileNavOpen(false)}
           />
         </SheetContent>
@@ -187,6 +199,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="rounded-md border bg-background p-1.5 text-sm hover:bg-accent"
             >
               {theme === "dark" ? "☀️" : "🌙"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setLocale(locale === "zh-CN" ? "en-US" : "zh-CN")}
+              className="rounded-md border bg-background px-2 py-1.5 text-xs hover:bg-accent"
+              aria-label="切换语言 / Switch language"
+            >
+              {locale === "zh-CN" ? "EN" : "中"}
             </button>
             <button
               type="button"

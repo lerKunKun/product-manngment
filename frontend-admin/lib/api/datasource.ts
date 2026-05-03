@@ -35,3 +35,54 @@ export const datasourceApi = {
   remove: (key: string) =>
     api.del<boolean>(`/admin/tenant/datasource/${encodeURIComponent(key)}`),
 };
+
+/* ----------------------------- T26: CRUD ----------------------------- */
+
+export type SysTenantDatasource = {
+  id: number;
+  tenantId: number;
+  tenantCode?: string;
+  jdbcUrl: string;
+  username: string;
+  password?: string; // 后端永远返 "****"
+  poolMin?: number;
+  poolMax?: number;
+  status: "ACTIVE" | "DISABLED";
+  createdAt?: string;
+};
+
+export type RegisterDatasourceReq = {
+  tenantId: number;
+  tenantCode: string;
+  jdbcUrl: string;
+  username: string;
+  password: string;
+  poolMin?: number;
+  poolMax?: number;
+};
+
+export const datasourceAdminApi = {
+  list: () => api.get<SysTenantDatasource[]>(`/admin/tenant/datasource-admin`),
+  create: (body: RegisterDatasourceReq, sensitiveToken?: string) =>
+    api.post<number>(
+      `/admin/tenant/datasource-admin`,
+      body,
+      sensitiveToken ? { headers: { "X-Sensitive-Token": sensitiveToken } } : undefined
+    ),
+  remove: (id: number, sensitiveToken?: string) =>
+    api.del<void>(
+      `/admin/tenant/datasource-admin/${id}`,
+      sensitiveToken ? { headers: { "X-Sensitive-Token": sensitiveToken } } : undefined
+    ),
+  update: (
+    id: number,
+    body: Partial<{ poolMin: number; poolMax: number; status: string }>
+  ) => api.put<void>(`/admin/tenant/datasource-admin/${id}`, body),
+  requestSensitiveCode: (action: string) =>
+    api.post<void>("/auth/sensitive/request", { action }),
+  verifySensitive: (action: string, code: string) =>
+    api.post<{ sensitiveToken: string; ttl: string }>("/auth/sensitive/verify", {
+      action,
+      code,
+    }),
+};
