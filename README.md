@@ -167,6 +167,48 @@ colima start --cpu 4 --memory 8 --disk 60
 
 ---
 
+## 安全审计
+
+### 依赖审计（每月跑一次）
+
+```bash
+# 前端
+cd frontend-admin && pnpm audit --audit-level moderate
+cd frontend-admin && pnpm outdated
+
+# 后端
+cd backend-api && mvn versions:display-dependency-updates
+cd backend-api && mvn dependency-check:check  # 需先装 plugin
+```
+
+### 已知漏洞处置原则
+
+| 严重度 | SLA | 处置 |
+|---|---|---|
+| CRITICAL / HIGH | 48 h | 立即升 patch（同 major.minor），不等下个 sprint |
+| MODERATE | 下个 sprint | 评估业务影响后升级 |
+| LOW / INFO | 技术债登记 | 不阻塞，纳入清债计划 |
+
+### 安全工具链
+
+- **Pre-commit hook** (`.githooks/pre-commit`) — 4 项检查：
+  - 拒绝提交敏感文件（.env / 配置信息.md / *.key / *.pem）
+  - Secret pattern 检测（shpss_ / atE / sk_live_ / wpat_ / shpat_）
+  - 前端 tsc 增量
+  - 后端 mvn compile 增量
+- **GitHub Trivy scan** — `.github/workflows/ci.yml` security-scan job 每次 push
+- **运行时告警** — 钉钉 ops 群 `BACKUP_FAIL` `HIGH_RISK_OP` `R2UploadFailureCritical` 等
+- **审计归档** — sys_audit_log 月归档至 R2（AES-256-GCM）+ 7 年留存
+
+### 启用 pre-commit hook
+
+```bash
+chmod +x .githooks/pre-commit
+git config core.hooksPath .githooks
+```
+
+---
+
 ## License
 
 Internal — Biou network 内部使用，未授权第三方分发。

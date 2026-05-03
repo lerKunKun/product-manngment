@@ -12,20 +12,21 @@ import {
 } from "@/lib/api/approval";
 import { useAuthStore } from "@/lib/auth/store";
 import type { ApiError } from "@/lib/api/client";
+import { useI18n } from "@/lib/i18n/context";
 
 type Tab = "mine" | "todo" | "all";
 
-const STATUS_FILTERS = [
-  { v: "", label: "全部" },
-  { v: "PENDING", label: "待审批" },
-  { v: "APPROVED", label: "已通过" },
-  { v: "REJECTED", label: "已驳回" },
-  { v: "CANCELLED", label: "已撤回" },
-];
-
 export default function ApprovalsPage() {
   const toast = useToast();
+  const { t } = useI18n();
   const me = useAuthStore((s) => s.user);
+  const STATUS_FILTERS = [
+    { v: "", label: t("approvals.status.all") },
+    { v: "PENDING", label: t("approvals.status.pending") },
+    { v: "APPROVED", label: t("approvals.status.approved") },
+    { v: "REJECTED", label: t("approvals.status.rejected") },
+    { v: "CANCELLED", label: t("approvals.status.cancelled") },
+  ];
   const [tab, setTab] = useState<Tab>("todo");
   const [status, setStatus] = useState<string>("");
   const [list, setList] = useState<ApprovalFlow[]>([]);
@@ -56,10 +57,10 @@ export default function ApprovalsPage() {
   }, [load]);
 
   async function cancel(id: number) {
-    if (!confirm(`撤回审批 #${id}？`)) return;
+    if (!confirm(t("approvals.confirmCancel").replace("{id}", String(id)))) return;
     try {
       await approvalApi.cancel(id);
-      toast.success(`#${id} 已撤回`);
+      toast.success(t("approvals.cancelled").replace("{id}", String(id)));
       load();
     } catch {
       /* toast 已上报 */
@@ -70,9 +71,9 @@ export default function ApprovalsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">审批中心</h1>
+          <h1 className="text-2xl font-semibold">{t("approvals.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            产品库使用权 / 跨公司授权 等申请的待办、提交记录与历史。
+            {t("approvals.description")}
           </p>
         </div>
       </div>
@@ -80,21 +81,21 @@ export default function ApprovalsPage() {
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-background p-3">
         <div className="flex gap-1 text-sm">
           {[
-            { v: "todo", label: "我审批的" },
-            { v: "mine", label: "我提交的" },
-            { v: "all", label: "全部" },
-          ].map((t) => (
+            { v: "todo", label: t("approvals.tab.todo") },
+            { v: "mine", label: t("approvals.tab.mine") },
+            { v: "all", label: t("approvals.tab.all") },
+          ].map((tt) => (
             <button
-              key={t.v}
-              onClick={() => setTab(t.v as Tab)}
+              key={tt.v}
+              onClick={() => setTab(tt.v as Tab)}
               className={
                 "rounded-md border px-3 py-1.5 transition-colors " +
-                (tab === t.v
+                (tab === tt.v
                   ? "border-primary bg-primary text-primary-foreground"
                   : "")
               }
             >
-              {t.label}
+              {tt.label}
             </button>
           ))}
         </div>
@@ -122,18 +123,18 @@ export default function ApprovalsPage() {
       {loading ? (
         <LoadingBlock />
       ) : list.length === 0 ? (
-        <EmptyState title="暂无审批" />
+        <EmptyState title={t("approvals.empty")} />
       ) : (
         <div className="overflow-hidden rounded-lg border bg-background">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-left">
               <tr>
                 <th className="px-3 py-2 font-medium">#</th>
-                <th className="px-3 py-2 font-medium">类型</th>
-                <th className="px-3 py-2 font-medium">申请人</th>
-                <th className="px-3 py-2 font-medium">状态</th>
-                <th className="px-3 py-2 font-medium">创建</th>
-                <th className="px-3 py-2 font-medium text-right">操作</th>
+                <th className="px-3 py-2 font-medium">{t("approvals.column.type")}</th>
+                <th className="px-3 py-2 font-medium">{t("approvals.column.applicant")}</th>
+                <th className="px-3 py-2 font-medium">{t("approvals.column.status")}</th>
+                <th className="px-3 py-2 font-medium">{t("approvals.column.created")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("approvals.column.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -162,7 +163,7 @@ export default function ApprovalsPage() {
                         href={`/approvals/${f.id}`}
                         className="rounded-md border bg-background px-2 py-1 text-xs hover:bg-accent"
                       >
-                        详情
+                        {t("approvals.action.detail")}
                       </Link>
                       {f.status === "PENDING" &&
                         Number(f.applicantId) === Number(me?.userId) && (
@@ -170,7 +171,7 @@ export default function ApprovalsPage() {
                             onClick={() => cancel(f.id)}
                             className="ml-2 rounded-md border bg-background px-2 py-1 text-xs hover:bg-accent"
                           >
-                            撤回
+                            {t("approvals.action.cancel")}
                           </button>
                         )}
                     </td>

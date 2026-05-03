@@ -6,7 +6,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/auth/store";
 import { AppShell } from "@/components/layout/AppShell";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { I18nProvider } from "@/lib/i18n/context";
 
 export default function AuthedLayout({
   children,
@@ -46,11 +45,9 @@ export default function AuthedLayout({
 
   return (
     <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <AppShell>
-          <ErrorBoundary>{children}</ErrorBoundary>
-        </AppShell>
-      </I18nProvider>
+      <AppShell>
+        <ErrorBoundary>{children}</ErrorBoundary>
+      </AppShell>
     </QueryClientProvider>
   );
 }

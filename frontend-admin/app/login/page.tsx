@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { authApi } from "@/lib/api/auth";
 import { useAuthStore } from "@/lib/auth/store";
 import type { ApiError } from "@/lib/api/client";
+import { useI18n } from "@/lib/i18n/context";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const setSession = useAuthStore((s) => s.setSession);
 
   const [tab, setTab] = useState<"password" | "dingtalk">("password");
@@ -59,7 +61,7 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <div className="w-full max-w-sm rounded-lg border bg-background p-8 shadow-sm">
-        <h1 className="mb-1 text-xl font-semibold">登录</h1>
+        <h1 className="mb-1 text-xl font-semibold">{t("login.title")}</h1>
         <p className="mb-6 text-xs text-muted-foreground">
           Biou × Shopify Control Center
         </p>
@@ -76,7 +78,7 @@ export default function LoginPage() {
                   : "border-transparent text-muted-foreground")
               }
             >
-              {k === "password" ? "用户名密码" : "钉钉扫码"}
+              {k === "password" ? t("login.passwordTab") : t("login.dingtalkScan")}
             </button>
           ))}
         </div>
@@ -84,22 +86,24 @@ export default function LoginPage() {
         {tab === "password" && (
           <form onSubmit={handlePasswordLogin} className="space-y-4">
             <div>
-              <label className="mb-1.5 block text-sm font-medium">用户名</label>
+              <label className="mb-1.5 block text-sm font-medium">{t("login.username")}</label>
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
+                placeholder={t("login.username")}
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium">密码</label>
+              <label className="mb-1.5 block text-sm font-medium">{t("login.password")}</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoFocus
+                placeholder={t("login.password")}
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
@@ -109,10 +113,10 @@ export default function LoginPage() {
               disabled={busy}
               className="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
-              {busy ? "登录中..." : "登录"}
+              {busy ? t("login.submitting") : t("login.submit")}
             </button>
             <p className="text-center text-xs text-muted-foreground">
-              dev 默认账号：admin / admin123
+              {t("login.devHint")}
             </p>
           </form>
         )}
@@ -120,7 +124,7 @@ export default function LoginPage() {
         {tab === "dingtalk" && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              点击下方按钮跳转钉钉同意授权页面，授权后会自动回到本系统。
+              {t("login.dingtalkTip")}
             </p>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <button
@@ -128,10 +132,10 @@ export default function LoginPage() {
               disabled={busy}
               className="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
-              {busy ? "正在跳转..." : "前往钉钉登录"}
+              {busy ? t("login.dingtalkRedirecting") : t("login.dingtalkSubmit")}
             </button>
             <p className="text-center text-xs text-muted-foreground">
-              首次登录的钉钉用户会自动注册账号
+              {t("login.dingtalkRegisterHint")}
             </p>
           </div>
         )}

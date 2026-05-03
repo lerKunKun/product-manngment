@@ -10,6 +10,7 @@ import { auditLogApi, type SysAuditLog } from "@/lib/api/auditLog";
 import type { ApiError } from "@/lib/api/client";
 import { DateRangePicker } from "@/components/ui/DateRangePicker";
 import { Card } from "@/components/ui/Card";
+import { useI18n } from "@/lib/i18n/context";
 
 const PAGE_SIZE = 50;
 
@@ -25,6 +26,7 @@ function tryPrettyJson(s?: string): string {
 }
 
 export default function AuditLogPage() {
+  const { t } = useI18n();
   const [userId, setUserId] = useState("");
   const [moduleQ, setModuleQ] = useState("");
   const [action, setAction] = useState("");
@@ -91,9 +93,9 @@ export default function AuditLogPage() {
     <div className="space-y-4">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">审计日志</h1>
+          <h1 className="text-2xl font-semibold">{t("auditLog.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            系统操作审计；支持按用户 / 模块 / 动作 / 敏感性筛选；可导出 CSV。
+            {t("auditLog.description")}
           </p>
         </div>
         <button
@@ -101,13 +103,13 @@ export default function AuditLogPage() {
           disabled={loading}
           className="rounded-md border px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
         >
-          导出 CSV
+          {t("auditLog.export")}
         </button>
       </div>
 
       <Card className="p-3">
         <div className="flex flex-wrap items-end gap-3">
-          <Field label="userId">
+          <Field label={t("auditLog.filter.userId")}>
             <input
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
@@ -116,7 +118,7 @@ export default function AuditLogPage() {
               className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm"
             />
           </Field>
-          <Field label="module">
+          <Field label={t("auditLog.filter.module")}>
             <input
               value={moduleQ}
               onChange={(e) => setModuleQ(e.target.value)}
@@ -124,7 +126,7 @@ export default function AuditLogPage() {
               className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
             />
           </Field>
-          <Field label="action">
+          <Field label={t("auditLog.filter.action")}>
             <input
               value={action}
               onChange={(e) => setAction(e.target.value)}
@@ -132,18 +134,18 @@ export default function AuditLogPage() {
               className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
             />
           </Field>
-          <Field label="敏感性">
+          <Field label={t("auditLog.filter.sensitive")}>
             <select
               value={sensitive}
               onChange={(e) => setSensitive(e.target.value as SensitiveFilter)}
               className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm"
             >
-              <option value="ALL">全部</option>
-              <option value="ONLY">仅敏感</option>
-              <option value="EXCLUDE">仅非敏感</option>
+              <option value="ALL">{t("auditLog.filter.sensitiveAll")}</option>
+              <option value="ONLY">{t("auditLog.filter.sensitiveOnly")}</option>
+              <option value="EXCLUDE">{t("auditLog.filter.sensitiveExclude")}</option>
             </select>
           </Field>
-          <Field label="时间范围">
+          <Field label={t("auditLog.filter.dateRange")}>
             <DateRangePicker
               from={from || undefined}
               to={to || undefined}
@@ -168,13 +170,13 @@ export default function AuditLogPage() {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
-              <th className="px-3 py-2 text-left">时间</th>
-              <th className="px-3 py-2 text-left">用户</th>
-              <th className="px-3 py-2 text-left">module.action</th>
-              <th className="px-3 py-2 text-left">请求</th>
-              <th className="px-3 py-2 text-left">IP</th>
-              <th className="px-3 py-2 text-left">状态码</th>
-              <th className="px-3 py-2 text-left">敏感</th>
+              <th className="px-3 py-2 text-left">{t("auditLog.column.time")}</th>
+              <th className="px-3 py-2 text-left">{t("auditLog.column.user")}</th>
+              <th className="px-3 py-2 text-left">{t("auditLog.column.module")}</th>
+              <th className="px-3 py-2 text-left">{t("auditLog.column.request")}</th>
+              <th className="px-3 py-2 text-left">{t("auditLog.column.ip")}</th>
+              <th className="px-3 py-2 text-left">{t("auditLog.column.status")}</th>
+              <th className="px-3 py-2 text-left">{t("auditLog.column.sensitive")}</th>
             </tr>
           </thead>
           <tbody>
@@ -188,7 +190,7 @@ export default function AuditLogPage() {
             {!loading && data.records.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-3 py-2">
-                  <EmptyState title="暂无审计日志" />
+                  <EmptyState title={t("auditLog.empty")} />
                 </td>
               </tr>
             )}

@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/StatusBlocks";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
+import { useI18n } from "@/lib/i18n/context";
 
 /**
  * 任务列表（W2-PUSH-06 + T9 增强）。
@@ -50,6 +51,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function TasksPage() {
   const sp = useSearchParams();
   const toast = useToast();
+  const { t } = useI18n();
   const initialType = sp.get("type") ?? "";
   const initialStatus = sp.get("status") ?? "";
   const initialStoreId = sp.get("storeId") ?? "";
@@ -123,7 +125,7 @@ export default function TasksPage() {
 
   async function onCancel(id: number) {
     if (!TASK_CANCEL_AVAILABLE) return;
-    if (!window.confirm(`取消任务 #${id}？`)) return;
+    if (!window.confirm(t("tasks.confirmCancel").replace("{id}", String(id)))) return;
     setCanceling((m) => ({ ...m, [id]: true }));
     try {
       await taskApi.cancel(id);
@@ -149,7 +151,7 @@ export default function TasksPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">任务</h1>
+        <h1 className="text-2xl font-semibold">{t("tasks.title")}</h1>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <label className="flex cursor-pointer items-center gap-1.5">
             <input
@@ -158,7 +160,7 @@ export default function TasksPage() {
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="h-3.5 w-3.5"
             />
-            <span>自动刷新 30s</span>
+            <span>{t("tasks.autoRefresh")}</span>
           </label>
           <span>
             {hasActive ? `轮询中 · ${POLL_INTERVAL_MS / 1000}s` : "已停止轮询"}
@@ -216,15 +218,15 @@ export default function TasksPage() {
           <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="w-8 px-2 py-2"></th>
-              <th className="px-3 py-2 text-left">ID</th>
-              <th className="px-3 py-2 text-left">类型</th>
-              <th className="px-3 py-2 text-left">状态</th>
-              <th className="px-3 py-2 text-left">店铺 ID</th>
+              <th className="px-3 py-2 text-left">{t("tasks.column.id")}</th>
+              <th className="px-3 py-2 text-left">{t("tasks.column.type")}</th>
+              <th className="px-3 py-2 text-left">{t("tasks.column.status")}</th>
+              <th className="px-3 py-2 text-left">{t("tasks.column.store")} ID</th>
               <th className="px-3 py-2 text-left">开始</th>
               <th className="px-3 py-2 text-left">完成</th>
               <th className="px-3 py-2 text-right">耗时</th>
               <th className="px-3 py-2 text-left">触发者</th>
-              <th className="px-3 py-2 text-right">操作</th>
+              <th className="px-3 py-2 text-right">{t("tasks.column.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -239,7 +241,7 @@ export default function TasksPage() {
               <tr>
                 <td colSpan={10} className="px-3 py-2">
                   <EmptyState
-                    title="暂无任务"
+                    title={t("tasks.empty")}
                     hint="可在产品详情页点击「推送到店铺」创建一条 PRODUCT_PUSH 任务"
                   />
                 </td>
@@ -356,6 +358,7 @@ function TaskRow({
   canceling: boolean;
   children?: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const failed = r.status === "FAILED";
   const cancelable = r.status === "PENDING" || r.status === "RUNNING";
   const retryDisabled = !TASK_RETRY_AVAILABLE || retrying;
@@ -374,7 +377,7 @@ function TaskRow({
               type="button"
               onClick={onToggle}
               className="text-muted-foreground hover:text-foreground"
-              aria-label={expanded ? "折叠子任务" : "展开子任务"}
+              aria-label={expanded ? t("tasks.action.collapse") : t("tasks.action.expand")}
             >
               {expanded ? "▼" : "▶"}
             </button>
@@ -420,7 +423,7 @@ function TaskRow({
                 }
                 className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {retrying ? "重试中…" : "重试"}
+                {retrying ? "重试中…" : t("tasks.action.retry")}
               </button>
             )}
             {cancelable && (
@@ -431,7 +434,7 @@ function TaskRow({
                 title="取消该任务"
                 className="rounded border border-rose-300 bg-rose-50 px-2 py-1 text-xs text-rose-900 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {canceling ? "取消中…" : "取消"}
+                {canceling ? "取消中…" : t("tasks.action.cancel")}
               </button>
             )}
             <Link

@@ -10,6 +10,13 @@ import {
 } from "@/lib/api/crossAuth";
 import { CrossAuthGrantDialog } from "@/components/crossAuth/CrossAuthGrantDialog";
 import type { ApiError } from "@/lib/api/client";
+import { useI18n } from "@/lib/i18n/context";
+
+const SENSITIVE_ACTION = "CROSS_AUTH_REVOKE";
+const SENSITIVE_ACTION_RENEW = "CROSS_AUTH_RENEW";
+
+const ONE_DAY_MS = 24 * 3600 * 1000;
+const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
 
 const STATUS_FILTERS = [
   { v: "", label: "全部" },
@@ -18,14 +25,9 @@ const STATUS_FILTERS = [
   { v: "EXPIRED", label: "已过期" },
 ];
 
-const SENSITIVE_ACTION = "CROSS_AUTH_REVOKE";
-const SENSITIVE_ACTION_RENEW = "CROSS_AUTH_RENEW";
-
-const ONE_DAY_MS = 24 * 3600 * 1000;
-const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
-
 export default function CrossAuthPage() {
   const toast = useToast();
+  const { t } = useI18n();
   const [list, setList] = useState<CrossAuthGrant[]>([]);
   const [status, setStatus] = useState<string>("ACTIVE");
   const [userIdFilter, setUserIdFilter] = useState<string>("");
@@ -69,7 +71,7 @@ export default function CrossAuthPage() {
       }
       const { sensitiveToken } = await crossAuthApi.verifySensitive(SENSITIVE_ACTION, code);
       await crossAuthApi.revoke(id, sensitiveToken);
-      toast.success(`#${id} 已撤销`);
+      toast.success(t("crossAuth.revoked").replace("{id}", String(id)));
       load();
     } catch {
       /* 全局 toast 已上报 */
@@ -114,7 +116,7 @@ export default function CrossAuthPage() {
         },
         sensitiveToken
       );
-      toast.success("已续期 7 天");
+      toast.success(t("crossAuth.renewed"));
       load();
     } catch {
       /* 全局 toast 已上报 */
@@ -127,9 +129,9 @@ export default function CrossAuthPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">跨公司授权</h1>
+          <h1 className="text-2xl font-semibold">{t("crossAuth.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            COMPANY_ADMIN 可向其他公司用户授予对本公司部分数据范围的访问；过期或撤销后立即失效。
+            {t("crossAuth.description")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -138,13 +140,13 @@ export default function CrossAuthPage() {
             title="v1.1 支持"
             className="cursor-not-allowed rounded-md border px-4 py-2 text-sm font-medium opacity-50"
           >
-            批量授权
+            {t("crossAuth.batchCreate")}
           </button>
           <button
             onClick={() => setDialogOpen(true)}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
-            + 新建跨公司授权
+            {t("crossAuth.create")}
           </button>
         </div>
       </div>
@@ -152,7 +154,7 @@ export default function CrossAuthPage() {
       {expiringSoon.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
           <div className="font-medium text-amber-900">
-            ⚠ {expiringSoon.length} 条授权 24 小时内到期
+            ⚠ {t("crossAuth.expiringSoonTitle").replace("{{count}}", String(expiringSoon.length))}
           </div>
           <ul className="mt-2 space-y-1 text-sm text-amber-900">
             {expiringSoon.map((g) => (
@@ -168,7 +170,7 @@ export default function CrossAuthPage() {
                   onClick={() => renew(g)}
                   className="ml-auto rounded border border-amber-400 bg-white px-2 py-0.5 text-xs hover:bg-amber-100"
                 >
-                  续期 7 天
+                  {t("crossAuth.renew7d")}
                 </button>
               </li>
             ))}
@@ -227,15 +229,15 @@ export default function CrossAuthPage() {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
-              <th className="px-3 py-2 text-left">ID</th>
-              <th className="px-3 py-2 text-left">受让人 userId</th>
-              <th className="px-3 py-2 text-left">范围</th>
-              <th className="px-3 py-2 text-left">来源</th>
-              <th className="px-3 py-2 text-left">过期时间</th>
-              <th className="px-3 py-2 text-left">状态</th>
-              <th className="px-3 py-2 text-left">已通知</th>
-              <th className="px-3 py-2 text-left">创建时间</th>
-              <th className="px-3 py-2 text-right">操作</th>
+              <th className="px-3 py-2 text-left">{t("crossAuth.column.id")}</th>
+              <th className="px-3 py-2 text-left">{t("crossAuth.column.userId")}</th>
+              <th className="px-3 py-2 text-left">{t("crossAuth.column.scope")}</th>
+              <th className="px-3 py-2 text-left">{t("crossAuth.column.source")}</th>
+              <th className="px-3 py-2 text-left">{t("crossAuth.column.expiresAt")}</th>
+              <th className="px-3 py-2 text-left">{t("crossAuth.column.status")}</th>
+              <th className="px-3 py-2 text-left">{t("crossAuth.column.notified")}</th>
+              <th className="px-3 py-2 text-left">{t("crossAuth.column.createdAt")}</th>
+              <th className="px-3 py-2 text-right">{t("crossAuth.column.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -303,13 +305,13 @@ export default function CrossAuthPage() {
                             onClick={() => renew(g)}
                             className="mr-1 rounded border px-2 py-1 text-xs hover:bg-accent"
                           >
-                            续期
+                            {t("crossAuth.renew")}
                           </button>
                           <button
                             onClick={() => revoke(g.id)}
                             className="rounded border px-2 py-1 text-xs hover:bg-accent"
                           >
-                            撤销
+                            {t("crossAuth.revoke")}
                           </button>
                         </>
                       )}

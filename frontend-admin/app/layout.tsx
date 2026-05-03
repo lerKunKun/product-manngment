@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/Toast";
+import { RootProviders } from "@/components/Providers";
 
 export const metadata: Metadata = {
   title: "Biou x Shopify Control Center",
@@ -22,7 +23,9 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen bg-background font-sans antialiased">
-        <ToastProvider>{children}</ToastProvider>
+        <RootProviders>
+          <ToastProvider>{children}</ToastProvider>
+        </RootProviders>
       </body>
     </html>
   );
