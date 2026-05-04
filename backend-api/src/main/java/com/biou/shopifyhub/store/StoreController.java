@@ -52,9 +52,12 @@ public class StoreController {
         Map<Long, Long> productCountByStore = new HashMap<>();
         if (!stores.isEmpty()) {
             List<Long> storeIds = stores.stream().map(Store::getId).toList();
+            // 注意：MyBatis-Plus QueryWrapper.select(String...) 多参版本会给每个参数
+            // 加反引号 → 把 COUNT(*) AS cnt 包成 `COUNT(*) AS cnt` 撞 SQL 语法错。
+            // 改用单字符串 select(String) 透传不加引号；同时 COUNT(*) → COUNT(id) 双保险
             List<Map<String, Object>> rows = storeProductMapper.selectMaps(
                 new QueryWrapper<StoreProduct>()
-                    .select("store_id", "COUNT(*) AS cnt")
+                    .select("store_id, COUNT(id) AS cnt")
                     .in("store_id", storeIds)
                     .eq("status", "ACTIVE")
                     .groupBy("store_id")
