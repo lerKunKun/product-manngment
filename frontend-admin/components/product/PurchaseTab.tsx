@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, ErrorBanner } from "@/components/ui/StatusBlocks";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { purchaseApi, type PurchaseInfo, type SkuChangeLog } from "@/lib/api/purchase";
+import { utilApi, type UsdCnyRate } from "@/lib/api/util";
 import { SkuChangeDialog } from "./SkuChangeDialog";
 import type { ApiError } from "@/lib/api/client";
 
@@ -15,7 +16,6 @@ type Currency = "USD" | "CNY";
 
 type Draft = {
   cost: string;
-  currency: Currency;
   grossWeight: string;
   logisticsTags: string;
   purchaseUrl: string;
@@ -25,7 +25,6 @@ type Draft = {
 function toDraft(r: PurchaseInfo): Draft {
   return {
     cost: r.cost == null ? "" : String(r.cost),
-    currency: (r.currency === "USD" || r.currency === "CNY" ? r.currency : "CNY") as Currency,
     grossWeight: r.grossWeight == null ? "" : String(r.grossWeight),
     logisticsTags: r.logisticsTags ?? "",
     purchaseUrl: r.purchaseUrl ?? "",
@@ -34,6 +33,16 @@ function toDraft(r: PurchaseInfo): Draft {
 }
 
 const CURRENCY_SYMBOL: Record<Currency, string> = { USD: "$", CNY: "¥" };
+
+/** 取多数 currency 作为整产品币种；空集 / 无数据走 CNY 默认（与 V6 schema 默认值一致）。*/
+function majorityCurrency(rows: PurchaseInfo[]): Currency {
+  let usd = 0, cny = 0;
+  for (const r of rows) {
+    if (r.currency === "USD") usd++;
+    else cny++; // null / 其他都按 CNY 处理（兼容历史脏数据）
+  }
+  return usd > cny ? "USD" : "CNY";
+}
 
 const SYNC_BADGE: Record<string, { v: BadgeVariant; label: string }> = {
   PENDING: { v: "warning", label: "PENDING" },
@@ -50,6 +59,11 @@ export function PurchaseTab({ productId }: { productId: number }) {
   const [error, setError] = useState("");
   const [skuDialog, setSkuDialog] = useState<{ variantId: number; sku: string } | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
+  // 整产品币种：从全部 row 的 currency 取多数
+  const [productCurrency, setProductCurrency] = useState<Currency>("CNY");
+  const [switching, setSwitching] = useState(false);
+  // 复用顶栏汇率 API（后端 Redis 1h 缓存）
+  const [rate, setRate] = useState<UsdCnyRate | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,6 +74,7 @@ export function PurchaseTab({ productId }: { productId: number }) {
       const next: Record<number, Draft> = {};
       r.forEach((row) => (next[row.variantId] = toDraft(row)));
       setDrafts(next);
+      setProductCurrency(majorityCurrency(r));
     } catch (e) {
       setError((e as ApiError).message);
     } finally {
@@ -71,6 +86,57 @@ export function PurchaseTab({ productId }: { productId: number }) {
     load();
   }, [load]);
 
+  // 进 tab 拉一次汇率；后端缓存 1h，重复打不贵
+  useEffect(() => {
+    let alive = true;
+    utilApi.usdCnyRate()
+      .then((r) => {
+        if (alive) setRate(r);
+      })
+      .catch(() => {
+        if (alive) setRate({ rate: null, fetchedAt: Date.now(), source: "error" });
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /** 一键切币种：把当前产品下所有 purchase row 的 currency 字段统一对齐到 next。
+   *  数值不动（DB 不做汇率换算 — 用户根据顶部参考汇率自行决定是否重输金额）。 */
+  async function switchProductCurrency(next: Currency) {
+    if (next === productCurrency) return;
+    if (rows.length === 0) {
+      setProductCurrency(next);
+      return;
+    }
+    const dirty = rows.filter((r) => (r.currency ?? "CNY") !== next);
+    if (dirty.length === 0) {
+      setProductCurrency(next);
+      return;
+    }
+    setSwitching(true);
+    try {
+      await Promise.all(
+        dirty.map((r) =>
+          purchaseApi.updateVariant(r.variantId, { currency: next })
+        )
+      );
+      setProductCurrency(next);
+      toast.success(`已切换为 ${next}（${dirty.length} 行同步）`);
+      load();
+    } catch {
+      /* 单条失败由全局 toast 提示；不阻塞 UI */
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  // 顶栏汇率展示
+  const rateLabel = useMemo(() => {
+    if (!rate || rate.rate == null) return "汇率获取中…";
+    return `1 USD = ${Number(rate.rate).toFixed(4)} CNY`;
+  }, [rate]);
+
   function setField(variantId: number, k: keyof Draft, v: string) {
     setDrafts((d) => ({ ...d, [variantId]: { ...d[variantId], [k]: v } }));
   }
@@ -81,7 +147,6 @@ export function PurchaseTab({ productId }: { productId: number }) {
     const original = toDraft(row);
     if (
       d.cost === original.cost &&
-      d.currency === original.currency &&
       d.grossWeight === original.grossWeight &&
       d.logisticsTags === original.logisticsTags &&
       d.purchaseUrl === original.purchaseUrl &&
@@ -91,7 +156,7 @@ export function PurchaseTab({ productId }: { productId: number }) {
     }
     const body: Partial<PurchaseInfo> = {
       cost: d.cost === "" ? undefined : Number(d.cost),
-      currency: d.currency,
+      currency: productCurrency,
       grossWeight: d.grossWeight === "" ? undefined : Number(d.grossWeight),
       logisticsTags: d.logisticsTags || undefined,
       purchaseUrl: d.purchaseUrl || undefined,
@@ -111,12 +176,55 @@ export function PurchaseTab({ productId }: { productId: number }) {
 
   return (
     <div className="space-y-4">
+      {/* 产品级币种切换条：影响整张表所有行；右侧显示实时汇率参考（仅展示，不自动换算金额） */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">采购成本币种</span>
+          <div className="inline-flex overflow-hidden rounded border" role="group" aria-label="产品采购币种">
+            {(["USD", "CNY"] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                disabled={switching}
+                onClick={() => switchProductCurrency(c)}
+                className={
+                  "px-3 py-1 text-xs disabled:opacity-50 " +
+                  (productCurrency === c
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent")
+                }
+              >
+                {CURRENCY_SYMBOL[c]} {c}
+              </button>
+            ))}
+          </div>
+          {switching && (
+            <span className="text-xs text-muted-foreground">同步中...</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <span
+            className="rounded border bg-background px-2 py-1 font-mono tabular-nums text-xs text-muted-foreground"
+            title={
+              rate?.fetchedAt
+                ? `数据源：${rate.source}\n更新于：${new Date(rate.fetchedAt).toLocaleString("zh-CN")}`
+                : ""
+            }
+          >
+            实时汇率：{rateLabel}
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            （仅参考，切换币种不自动换算金额，需自行调整）
+          </span>
+        </div>
+      </div>
+
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-2 py-2 text-left">SKU</th>
-              <th className="px-2 py-2 text-right">采购成本（$ / ¥）</th>
+              <th className="px-2 py-2 text-right">采购成本（{CURRENCY_SYMBOL[productCurrency]} {productCurrency}）</th>
               <th className="px-2 py-2 text-right">克重 (g)</th>
               <th className="px-2 py-2 text-left">物流标签</th>
               <th className="px-2 py-2 text-left">采购链接</th>
@@ -150,37 +258,8 @@ export function PurchaseTab({ productId }: { productId: number }) {
                   </td>
                   <td className="px-2 py-2 text-right">
                     <div className="inline-flex items-center gap-1">
-                      {/* 币种切换 toggle —— 默认 CNY，可切到 USD；commit 时一并发后端 */}
-                      <div
-                        className="inline-flex overflow-hidden rounded border text-[11px]"
-                        role="group"
-                        aria-label="币种"
-                      >
-                        {(["USD", "CNY"] as const).map((c) => (
-                          <button
-                            key={c}
-                            type="button"
-                            onClick={() => {
-                              setDrafts((prev) => ({
-                                ...prev,
-                                [r.variantId]: { ...prev[r.variantId], currency: c },
-                              }));
-                              // 切币种立即提交（与原 onBlur 行为一致）
-                              setTimeout(() => commit(r), 0);
-                            }}
-                            className={
-                              "px-1.5 py-0.5 " +
-                              (d.currency === c
-                                ? "bg-primary text-primary-foreground"
-                                : "text-muted-foreground hover:bg-accent")
-                            }
-                          >
-                            {c}
-                          </button>
-                        ))}
-                      </div>
                       <span className="text-xs text-muted-foreground">
-                        {CURRENCY_SYMBOL[d.currency]}
+                        {CURRENCY_SYMBOL[productCurrency]}
                       </span>
                       <input
                         type="number"
