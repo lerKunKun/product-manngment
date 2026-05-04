@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, ErrorBanner, EmptyState } from "@/components/ui/StatusBlocks";
 import { Dialog } from "@/components/ui/Dialog";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { FileUploadDropzone } from "@/components/upload/FileUploadDropzone";
 
 const inp =
   "w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -479,19 +480,18 @@ export default function TemplateDetailPage() {
             />
           </Field>
           <Field label="主题 zip 文件（≤100MB）">
-            <input
-              type="file"
+            <FileUploadDropzone
               accept=".zip,application/zip"
-              onChange={(e) =>
-                setVDraft({ ...vDraft, file: e.target.files?.[0] ?? null })
+              multiple={false}
+              hint={
+                vDraft.file
+                  ? `${vDraft.file.name} · ${humanBytes(vDraft.file.size)}`
+                  : "拖拽 .zip 或点击选择"
               }
-              className="text-sm"
+              onFiles={(files) =>
+                setVDraft({ ...vDraft, file: files[0] ?? null })
+              }
             />
-            {vDraft.file && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {vDraft.file.name} · {humanBytes(vDraft.file.size)}
-              </p>
-            )}
           </Field>
           <Field label="变更日志（选填）">
             <textarea

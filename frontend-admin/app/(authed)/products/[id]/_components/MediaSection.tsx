@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { productApi, type ProductImage } from "@/lib/api/product";
 import type { ApiError } from "@/lib/api/client";
-import { FileUploadDropzone } from "./FileUploadDropzone";
+import { FileUploadDropzone } from "@/components/upload/FileUploadDropzone";
 import { MediaPreviewLightbox } from "./MediaPreviewLightbox";
 import { TagInput } from "./TagInput";
 

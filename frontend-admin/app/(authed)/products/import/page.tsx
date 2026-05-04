@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/store";
+import { FileUploadDropzone } from "@/components/upload/FileUploadDropzone";
 
 type Report = {
   success: number;
@@ -11,17 +12,16 @@ type Report = {
 
 export default function ImportProductsPage() {
   const router = useRouter();
-  const fileRef = useRef<HTMLInputElement>(null);
   const accessToken = useAuthStore((s) => s.accessToken);
   const [companyId, setCompanyId] = useState(1);
+  const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const f = fileRef.current?.files?.[0];
-    if (!f) {
+    if (!file) {
       setError("请选择 CSV 文件");
       return;
     }
@@ -30,7 +30,7 @@ export default function ImportProductsPage() {
     setReport(null);
     try {
       const fd = new FormData();
-      fd.append("file", f);
+      fd.append("file", file);
       fd.append("ownerCompanyId", String(companyId));
       const resp = await fetch("/api/product/import", {
         method: "POST",
@@ -72,7 +72,20 @@ export default function ImportProductsPage() {
         </div>
         <div>
           <label className="mb-1.5 block text-sm font-medium">CSV 文件</label>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" required className="text-sm" />
+          <FileUploadDropzone
+            accept=".csv,text/csv"
+            multiple={false}
+            disabled={busy}
+            hint={
+              file
+                ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB`
+                : "Shopify 标准 42 列 CSV 模板（≤100MB）"
+            }
+            onFiles={(files) => {
+              setFile(files[0] ?? null);
+              setError("");
+            }}
+          />
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <button
