@@ -1,9 +1,12 @@
 package com.biou.shopifyhub.snapshot;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.file.FileService;
+import com.biou.shopifyhub.push.entity.StoreProduct;
+import com.biou.shopifyhub.push.mapper.StoreProductMapper;
 import com.biou.shopifyhub.snapshot.entity.ProductInventoryHistory;
 import com.biou.shopifyhub.snapshot.entity.ProductPriceHistory;
 import com.biou.shopifyhub.snapshot.entity.ProductSnapshot;
@@ -42,19 +45,39 @@ public class ProductSnapshotController {
     private final SnapshotDebounceService debounceService;
     private final FileService fileService;
     private final ObjectMapper objectMapper;
+    private final StoreProductMapper storeProductMapper;
 
     public ProductSnapshotController(ProductSnapshotMapper snapshotMapper,
                                      ProductPriceHistoryMapper priceHistoryMapper,
                                      ProductInventoryHistoryMapper inventoryHistoryMapper,
                                      SnapshotDebounceService debounceService,
                                      FileService fileService,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     StoreProductMapper storeProductMapper) {
         this.snapshotMapper = snapshotMapper;
         this.priceHistoryMapper = priceHistoryMapper;
         this.inventoryHistoryMapper = inventoryHistoryMapper;
         this.debounceService = debounceService;
         this.fileService = fileService;
         this.objectMapper = objectMapper;
+        this.storeProductMapper = storeProductMapper;
+    }
+
+    /**
+     * 反查平台内部 product.id：snapshot 行只带 Shopify 的 product_external_id，
+     * 但 product_snapshot.product_id 列需要回填到本平台的 product 表 id 上，
+     * 方便后续历史/产品维度的查询走 product_id 索引。
+     * 通过 store_product 映射表（push 时建立）反查；映射不存在时返 null。
+     */
+    private Long resolvePlatformProductId(Long storeId, String productExternalId) {
+        if (storeId == null || productExternalId == null) return null;
+        StoreProduct sp = storeProductMapper.selectOne(
+            new QueryWrapper<StoreProduct>()
+                .eq("store_id", storeId)
+                .eq("shopify_product_id", productExternalId)
+                .last("LIMIT 1")
+        );
+        return sp == null ? null : sp.getProductId();
     }
 
     @GetMapping
@@ -175,10 +198,12 @@ public class ProductSnapshotController {
         }
         long tenantId = req.tenantId == null ? 1L : req.tenantId;
 
+        String externalId = req.productExternalId.trim();
         ProductSnapshot snap = new ProductSnapshot();
         snap.setTenantId(tenantId);
         snap.setStoreId(req.storeId);
-        snap.setProductExternalId(req.productExternalId.trim());
+        snap.setProductExternalId(externalId);
+        snap.setProductId(resolvePlatformProductId(req.storeId, externalId));
         snap.setTriggerEvent("MANUAL");
         snap.setStatus("PENDING");
         snap.setTotalBytes(0L);

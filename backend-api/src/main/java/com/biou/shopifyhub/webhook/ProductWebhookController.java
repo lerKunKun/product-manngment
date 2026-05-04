@@ -1,6 +1,8 @@
 package com.biou.shopifyhub.webhook;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.biou.shopifyhub.push.entity.StoreProduct;
+import com.biou.shopifyhub.push.mapper.StoreProductMapper;
 import com.biou.shopifyhub.snapshot.PriceInventoryHistoryService;
 import com.biou.shopifyhub.snapshot.SnapshotDebounceService;
 import com.biou.shopifyhub.snapshot.entity.ProductSnapshot;
@@ -54,19 +56,22 @@ public class ProductWebhookController {
     private final ProductSnapshotMapper snapshotMapper;
     private final SnapshotDebounceService debounceService;
     private final PriceInventoryHistoryService priceInvService;
+    private final StoreProductMapper storeProductMapper;
 
     public ProductWebhookController(ShopifyHmacVerifier hmac,
                                     ObjectMapper objectMapper,
                                     StoreMapper storeMapper,
                                     ProductSnapshotMapper snapshotMapper,
                                     SnapshotDebounceService debounceService,
-                                    PriceInventoryHistoryService priceInvService) {
+                                    PriceInventoryHistoryService priceInvService,
+                                    StoreProductMapper storeProductMapper) {
         this.hmac = hmac;
         this.objectMapper = objectMapper;
         this.storeMapper = storeMapper;
         this.snapshotMapper = snapshotMapper;
         this.debounceService = debounceService;
         this.priceInvService = priceInvService;
+        this.storeProductMapper = storeProductMapper;
     }
 
     @PostMapping("/update")
@@ -158,11 +163,18 @@ public class ProductWebhookController {
         // 5) Insert snapshot row (PENDING)
         ProductSnapshot snap = null;
         try {
+            // 反查 store_product 拿平台 product.id；映射不存在保持 null（首次 webhook 早于 push 时）
+            StoreProduct sp = storeProductMapper.selectOne(
+                new QueryWrapper<StoreProduct>()
+                    .eq("store_id", store.getId())
+                    .eq("shopify_product_id", productExternalId)
+                    .last("LIMIT 1")
+            );
             snap = new ProductSnapshot();
             snap.setTenantId(store.getTenantId());
             snap.setStoreId(store.getId());
             snap.setProductExternalId(productExternalId);
-            snap.setProductId(null); // resolution is W2-SNAP-04
+            snap.setProductId(sp == null ? null : sp.getProductId());
             snap.setTriggerEvent("WEBHOOK_UPDATE");
             snap.setStatus("PENDING");
             snap.setDiffSummaryJson(diffSummaryJson);
