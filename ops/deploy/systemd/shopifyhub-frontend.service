@@ -1,0 +1,31 @@
+[Unit]
+Description=ShopifyHub Frontend (Next.js standalone)
+Documentation=https://github.com/lerKunKun/product-manngment/blob/main/ops/deploy/README.md
+After=network-online.target shopifyhub-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=app
+Group=app
+WorkingDirectory=/opt/shopifyhub/frontend
+EnvironmentFile=/opt/shopifyhub/.env
+# Next.js standalone 输出包含 server.js；端口 3000 给 nginx 反代
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/shopifyhub/frontend/server.js
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+LimitNOFILE=65535
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/shopifyhub/frontend /var/log/shopifyhub
+ProtectHome=true
+PrivateTmp=true
+StandardOutput=append:/var/log/shopifyhub/frontend.log
+StandardError=append:/var/log/shopifyhub/frontend-err.log
+
+[Install]
+WantedBy=multi-user.target

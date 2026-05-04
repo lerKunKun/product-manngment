@@ -1,0 +1,33 @@
+[Unit]
+Description=ShopifyHub Backend (Spring Boot)
+Documentation=https://github.com/lerKunKun/product-manngment/blob/main/ops/deploy/README.md
+After=network-online.target mysql.service redis-server.service rabbitmq-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=app
+Group=app
+WorkingDirectory=/opt/shopifyhub
+EnvironmentFile=/opt/shopifyhub/.env
+# JVM 调优：4G 内存机器留 2G 给 jar，DB pool / cache 自己占；G1 GC 足以
+Environment=JAVA_OPTS=-Xms512m -Xmx2g -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/var/log/shopifyhub
+Environment=SPRING_PROFILES_ACTIVE=prod
+ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/shopifyhub/backend-api.jar
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+# 资源限制
+LimitNOFILE=65535
+TasksMax=4096
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/shopifyhub /var/log/shopifyhub /opt/shopifyhub/data
+ProtectHome=true
+PrivateTmp=true
+StandardOutput=append:/var/log/shopifyhub/backend.log
+StandardError=append:/var/log/shopifyhub/backend-err.log
+
+[Install]
+WantedBy=multi-user.target

@@ -101,6 +101,45 @@ services:
       echo 'MinIO buckets ready.';
       "
 
+  # asset-worker：Python FastAPI，处理 Shopify 推送 / 拉取 / 资产 R2 上传等。
+  # 主机 8765 → 容器 9000，对齐 backend `application-dev.yml#shopify.worker.base-url`
+  # 默认 http://localhost:8765。容器间用 service name 走内网，host=minio/rabbitmq。
+  asset-worker:
+    build: ./asset-worker
+    container_name: shopify-hub-asset-worker
+    restart: unless-stopped
+    ports:
+      - "8765:9000"
+    environment:
+      APP_PORT: "9000"
+      APP_ENV: dev
+      ASSET_WORKER_TOKEN: dev-worker-token
+      R2_ENDPOINT: http://minio:9000
+      R2_ACCESS_KEY_ID: minioadmin
+      R2_SECRET_ACCESS_KEY: minioadmin
+      R2_BUCKET: shopify-assets-dev
+      R2_PUBLIC_BASE: http://localhost:9000/shopify-assets-dev-public
+      MQ_HOST: rabbitmq
+      MQ_PORT: "5672"
+      MQ_USER: guest
+      MQ_PASS: guest
+      SHOPIFY_API_VERSION: "2024-10"
+      # backend SSE 进度回调（worker → backend）；backend 跑在 host 上时容器要走 host.docker.internal
+      BACKEND_PROGRESS_URL: http://host.docker.internal:8080/api/internal/asset
+      INTERNAL_API_TOKEN: dev-internal-token
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:9000/health',timeout=3); sys.exit(0 if r.status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   mysql-data:
   redis-data:

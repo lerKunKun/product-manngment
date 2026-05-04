@@ -1,0 +1,33 @@
+[Unit]
+Description=ShopifyHub Asset Worker (FastAPI / uvicorn)
+Documentation=https://github.com/lerKunKun/product-manngment/blob/main/ops/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=app
+Group=app
+WorkingDirectory=/opt/asset-worker/src/asset-worker
+EnvironmentFile=/opt/asset-worker/.env
+# 节点 B 跑在 WG 网段；端口 8000 暴露给节点 A（10.88.0.20:8000）
+ExecStart=/opt/asset-worker/.venv/bin/uvicorn app.main:app \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --workers 2 \
+  --proxy-headers \
+  --log-level info
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+LimitNOFILE=65535
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/asset-worker /var/log/shopifyhub
+ProtectHome=true
+PrivateTmp=true
+StandardOutput=append:/var/log/shopifyhub/asset-worker.log
+StandardError=append:/var/log/shopifyhub/asset-worker-err.log
+
+[Install]
+WantedBy=multi-user.target
