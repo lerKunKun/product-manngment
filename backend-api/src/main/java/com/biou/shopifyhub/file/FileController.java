@@ -29,11 +29,14 @@ public class FileController {
     ) {
         FileService.UploadResult r = fileService.uploadProductImage(productId, file);
 
-        // 写入 product_image 表
+        // 写入 product_image 表；r2_key 跟 src 一并落，push 时 buildProductPayload
+        // 才能把私有 R2 key 走 media_r2_keys[] 让 worker 拉下来（否则永远走 images[].src
+        // 公网 URL 路径，私有桶图片就没法推到 Shopify）
         Long maxPos = imageMapper.selectCount(new QueryWrapper<ProductImage>().eq("product_id", productId));
         ProductImage img = new ProductImage();
         img.setProductId(productId);
         img.setSrc(r.url());
+        img.setR2Key(r.key());
         img.setPosition(maxPos.intValue() + 1);
         img.setGiftCard(false);
         imageMapper.insert(img);
