@@ -1,13 +1,17 @@
 package com.biou.shopifyhub.store;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.biou.shopifyhub.auth.sensitive.RequireSensitiveOp;
 import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
+import com.biou.shopifyhub.push.entity.StoreProduct;
+import com.biou.shopifyhub.push.mapper.StoreProductMapper;
 import com.biou.shopifyhub.store.entity.Store;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,10 +24,13 @@ public class StoreController {
 
     private final StoreService service;
     private final ShopifyApiClient shopify;
+    private final StoreProductMapper storeProductMapper;
 
-    public StoreController(StoreService service, ShopifyApiClient shopify) {
+    public StoreController(StoreService service, ShopifyApiClient shopify,
+                           StoreProductMapper storeProductMapper) {
         this.service = service;
         this.shopify = shopify;
+        this.storeProductMapper = storeProductMapper;
     }
 
     @GetMapping
@@ -32,6 +39,27 @@ public class StoreController {
             @RequestParam(required = false) Boolean partnerCollab,
             @RequestParam(required = false) Boolean devStore) {
         List<Store> stores = service.list(tenantId, partnerCollab, devStore);
+
+        // 一次 GROUP BY 查所有 store 的活跃产品数，避免 N+1
+        Map<Long, Long> productCountByStore = new HashMap<>();
+        if (!stores.isEmpty()) {
+            List<Long> storeIds = stores.stream().map(Store::getId).toList();
+            List<Map<String, Object>> rows = storeProductMapper.selectMaps(
+                new QueryWrapper<StoreProduct>()
+                    .select("store_id", "COUNT(*) AS cnt")
+                    .in("store_id", storeIds)
+                    .eq("status", "ACTIVE")
+                    .groupBy("store_id")
+            );
+            for (Map<String, Object> r : rows) {
+                Object sid = r.get("store_id");
+                Object cnt = r.get("cnt");
+                if (sid instanceof Number && cnt instanceof Number) {
+                    productCountByStore.put(((Number) sid).longValue(), ((Number) cnt).longValue());
+                }
+            }
+        }
+
         List<Map<String, Object>> dto = stores.stream().map(s -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", s.getId());
@@ -44,6 +72,12 @@ public class StoreController {
             m.put("isDevStore", s.getIsDevStore());
             m.put("isPartnerCollab", s.getIsPartnerCollab());
             m.put("createdAt", s.getCreatedAt());
+            // 卡片版 UI 需要：已上架活跃产品数
+            m.put("productCount", productCountByStore.getOrDefault(s.getId(), 0L));
+            // GMV / 订单数：当前后端无聚合源（需打 Shopify Admin orders.json + 时间窗），
+            // 占位 null 让前端显示「—」；待 W3 接 Shopify orders 后再填
+            m.put("gmv", null);
+            m.put("orderCount", null);
             return m;
         }).toList();
         return Result.ok(dto);

@@ -1,178 +1,187 @@
 "use client";
 
-import { useState, useMemo } from "react";
+// TODO i18n: 卡片版重写后中文 hardcoded；后续抽到 messages.ts
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  storeApi,
-  type StoreItem,
-  STORE_DISABLE_AVAILABLE,
-  ASSET_TRIGGER_AVAILABLE,
-} from "@/lib/api/store";
+import { useRouter } from "next/navigation";
+import { storeApi, type StoreItem } from "@/lib/api/store";
 import { useStores, useInvalidateStores } from "@/lib/queries/stores";
 import { useToast } from "@/components/ui/Toast";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
-import { useI18n } from "@/lib/i18n/context";
 
-const STATUS_CLS: Record<string, string> = {
-  ACTIVE: "bg-emerald-100 text-emerald-900 border-emerald-300",
-  DISABLED: "bg-zinc-100 text-zinc-500 border-zinc-300",
-  TOKEN_EXPIRED: "bg-amber-100 text-amber-900 border-amber-300",
-  UNINSTALLED: "bg-rose-100 text-rose-900 border-rose-300",
+/** 域名 → 国旗 emoji。覆盖 biou-XX.myshopify.com 命名约定 + 兜底 🌐 */
+const COUNTRY_FLAG: Record<string, string> = {
+  cn: "🇨🇳", us: "🇺🇸", jp: "🇯🇵", de: "🇩🇪", fr: "🇫🇷",
+  uk: "🇬🇧", gb: "🇬🇧", au: "🇦🇺", ca: "🇨🇦", in: "🇮🇳",
+  br: "🇧🇷", mx: "🇲🇽", es: "🇪🇸", it: "🇮🇹", kr: "🇰🇷",
+  sg: "🇸🇬", hk: "🇭🇰", tw: "🇹🇼", nl: "🇳🇱", ru: "🇷🇺",
+};
+function flagFor(domain: string): string {
+  const m = domain.match(/^[^.]*?-([a-z]{2})\b/i) ?? domain.match(/^([a-z]{2})\./i);
+  if (m) {
+    const code = m[1].toLowerCase();
+    if (COUNTRY_FLAG[code]) return COUNTRY_FLAG[code];
+  }
+  return "🌐";
+}
+
+/** 状态显示映射：DISABLED 在 UI 上显示 PAUSED */
+const STATUS_INFO: Record<
+  StoreItem["status"],
+  { label: string; cls: string }
+> = {
+  ACTIVE: {
+    label: "ACTIVE",
+    cls: "bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-500/15 dark:text-emerald-400",
+  },
+  DISABLED: {
+    label: "PAUSED",
+    cls: "bg-zinc-100 text-zinc-600 border-zinc-300 dark:bg-zinc-500/15 dark:text-zinc-400",
+  },
+  TOKEN_EXPIRED: {
+    label: "TOKEN EXPIRED",
+    cls: "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-400",
+  },
+  UNINSTALLED: {
+    label: "UNINSTALLED",
+    cls: "bg-rose-100 text-rose-700 border-rose-300 dark:bg-rose-500/15 dark:text-rose-400",
+  },
 };
 
+/** plan 推断：当前后端没有 shopify_plan 字段，临时按 isDevStore 区分 */
+function planLabel(s: StoreItem): string {
+  if (s.isDevStore) return "Dev";
+  if (s.isPartnerCollab) return "Partner Dev";
+  return "Shopify";
+}
+
+/** token 剩余天数：null=未配置；负数=已过期 */
+function tokenDaysLeft(expiresAt?: string): number | null {
+  if (!expiresAt) return null;
+  const t = new Date(expiresAt).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.ceil((t - Date.now()) / 86_400_000);
+}
+
+function tokenBadgeClass(days: number | null): string {
+  if (days == null) return "bg-muted/40 text-muted-foreground border";
+  if (days < 0) return "bg-rose-100 text-rose-700 border-rose-300 dark:bg-rose-500/15 dark:text-rose-400";
+  if (days < 30) return "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-400";
+  return "bg-muted/40 text-muted-foreground border";
+}
+function tokenBadgeText(days: number | null): string {
+  if (days == null) return "未配置 token";
+  if (days < 0) return "token 已过期";
+  return `${days} 天 token`;
+}
+
+function fmtNumber(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return new Intl.NumberFormat("en-US").format(n);
+}
+function fmtGmv(n: number | null | undefined): string {
+  if (n == null) return "—";
+  // 显示成「¥218.4 万」格式（按截图）；GMV 后端没数据先占位，未来真实值按值切换 K/W 单位
+  if (n >= 10000) return `¥${(n / 10000).toFixed(1)} 万`;
+  return `¥${n.toFixed(2)}`;
+}
+
+const SENSITIVE_DELETE = "STORE_DELETE";
 const SENSITIVE_DISABLE = "STORE_BATCH_DISABLE";
+const SENSITIVE_PARTNER = "STORE_MARK_PARTNER_COLLAB";
 
 export default function StoresPage() {
-  const { t } = useI18n();
   const toast = useToast();
+  const router = useRouter();
   const { data, isPending, error } = useStores();
-  const invalidateStores = useInvalidateStores();
+  const invalidate = useInvalidateStores();
   const stores: StoreItem[] = data ?? [];
   const errorMsg = error ? (error as Error).message : "";
 
-  const STATUS_TEXT: Record<string, string> = {
-    ACTIVE: t("stores.status.active"),
-    DISABLED: t("stores.status.disabled"),
-    TOKEN_EXPIRED: t("stores.status.tokenExpired"),
-    UNINSTALLED: t("stores.status.uninstalled"),
-  };
+  const summary = useMemo(() => {
+    const total = stores.length;
+    const active = stores.filter((s) => s.status === "ACTIVE").length;
+    const paused = stores.filter((s) => s.status === "DISABLED").length;
+    const expired = stores.filter((s) => s.status === "TOKEN_EXPIRED").length;
+    const uninstalled = stores.filter((s) => s.status === "UNINSTALLED").length;
+    return { total, active, paused, expired, uninstalled };
+  }, [stores]);
 
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [busy, setBusy] = useState(false);
   const [healthChecking, setHealthChecking] = useState<Record<number, boolean>>({});
-
-  const allSelected = useMemo(
-    () => stores.length > 0 && stores.every((s) => selected.has(s.id)),
-    [stores, selected]
-  );
-  const someSelected = useMemo(
-    () => stores.some((s) => selected.has(s.id)) && !allSelected,
-    [stores, selected, allSelected]
-  );
-
-  function toggleAll() {
-    if (allSelected) setSelected(new Set());
-    else setSelected(new Set(stores.map((s) => s.id)));
-  }
-
-  function toggleOne(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
 
   async function onHealthCheck(id: number) {
     setHealthChecking((m) => ({ ...m, [id]: true }));
     try {
       const r = await storeApi.healthCheck(id);
-      if (r.ok) {
-        toast.success(t("stores.healthOk").replace("{id}", String(id)));
-      } else {
-        toast.error(
-          t("stores.healthFail")
-            .replace("{id}", String(id))
-            .replace("{message}", r.message ?? t("stores.healthUnknown"))
-        );
-      }
-      invalidateStores();
+      if (r.ok) toast.success(`#${id} 健康`);
+      else toast.error(`#${id} 检测失败：${r.message ?? "未知"}`);
+      invalidate();
     } finally {
       setHealthChecking((m) => ({ ...m, [id]: false }));
     }
   }
 
-  async function onBatchPullAssets() {
-    if (!ASSET_TRIGGER_AVAILABLE) {
-      toast.warn(t("stores.assetsNotImpl"));
-      return;
-    }
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
-    setBusy(true);
-    let done = 0;
-    let failed = 0;
+  /** 通用敏感操作：发码 → prompt → verify → 拿 token 给 callback。 */
+  async function withSensitive(action: string, fn: (token: string) => Promise<void>) {
     try {
-      for (const id of ids) {
-        try {
-          // 占位：未来调 assetApi.trigger(id)
-          await Promise.reject(new Error("endpoint missing"));
-        } catch {
-          failed++;
-        } finally {
-          done++;
-          toast.info(
-            t("stores.batchProgress")
-              .replace("{done}", String(done))
-              .replace("{total}", String(ids.length))
-          );
-        }
-      }
-      if (failed > 0) toast.error(t("stores.batchFailed").replace("{count}", String(failed)));
-      else toast.success(t("stores.batchPullDone"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onBatchDisable() {
-    if (!STORE_DISABLE_AVAILABLE) {
-      toast.warn(t("stores.disableNotImpl"));
-      return;
-    }
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
-    if (!window.confirm(t("stores.confirmDisable").replace("{count}", String(ids.length)))) {
-      return;
-    }
-    setBusy(true);
-    try {
-      await storeApi.requestSensitiveCode(SENSITIVE_DISABLE);
-      const code = window.prompt(t("stores.dingCodePrompt"));
+      await storeApi.requestSensitiveCode(action);
+      const code = window.prompt("钉钉验证码（已发送至工作通知）");
       if (!code) {
-        toast.info(t("stores.cancelled"));
+        toast.info("已取消");
         return;
       }
-      const { sensitiveToken } = await storeApi.verifySensitive(SENSITIVE_DISABLE, code);
-      let done = 0;
-      let failed = 0;
-      for (const id of ids) {
-        try {
-          await storeApi.disable(id, sensitiveToken);
-        } catch {
-          failed++;
-        } finally {
-          done++;
-          toast.info(
-            t("stores.batchProgress")
-              .replace("{done}", String(done))
-              .replace("{total}", String(ids.length))
-          );
-        }
-      }
-      if (failed > 0) toast.error(t("stores.batchFailed").replace("{count}", String(failed)));
-      else toast.success(t("stores.batchDisableDone"));
-      setSelected(new Set());
-      invalidateStores();
+      const { sensitiveToken } = await storeApi.verifySensitive(action, code);
+      await fn(sensitiveToken);
+      invalidate();
     } catch (e) {
       toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
     }
   }
 
-  const selectedCount = selected.size;
+  async function onDelete(s: StoreItem) {
+    if (!window.confirm(`删除店铺 ${s.myshopifyDomain}？此操作不可恢复。`)) return;
+    await withSensitive(SENSITIVE_DELETE, async (token) => {
+      await storeApi.delete(s.id, token);
+      toast.success("已删除");
+    });
+  }
+
+  async function onDisable(s: StoreItem) {
+    if (!window.confirm(`暂停店铺 ${s.myshopifyDomain}？`)) return;
+    await withSensitive(SENSITIVE_DISABLE, async (token) => {
+      await storeApi.disable(s.id, token);
+      toast.success("已暂停");
+    });
+  }
+
+  async function onTogglePartnerCollab(s: StoreItem) {
+    const target = !s.isPartnerCollab;
+    await withSensitive(SENSITIVE_PARTNER, async (token) => {
+      if (target) await storeApi.markPartnerCollab(s.id, token);
+      else await storeApi.unmarkPartnerCollab(s.id, token);
+      toast.success(target ? "已标记为合作店" : "已取消合作店标记");
+    });
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">{t("stores.title")}</h1>
+    <div className="space-y-6">
+      {/* 标题 + 摘要 + 接入新店铺 */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">店铺管理</h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {summary.total} 个店铺
+            {summary.active > 0 && <> · <span className="text-emerald-700 dark:text-emerald-400">{summary.active} 个 ACTIVE</span></>}
+            {summary.paused > 0 && <> · <span className="text-zinc-600 dark:text-zinc-400">{summary.paused} 个 PAUSED</span></>}
+            {summary.expired > 0 && <> · <span className="text-amber-700 dark:text-amber-400">{summary.expired} 个 TOKEN EXPIRED</span></>}
+            {summary.uninstalled > 0 && <> · <span className="text-rose-700 dark:text-rose-400">{summary.uninstalled} 个 UNINSTALLED</span></>}
+          </p>
+        </div>
         <Link
           href="/stores/new"
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
         >
-          {t("stores.create")}
+          + 接入新店铺
         </Link>
       </div>
 
@@ -182,122 +191,148 @@ export default function StoresPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
-        <div className="text-muted-foreground">
-          {selectedCount > 0
-            ? t("stores.selected").replace("{count}", String(selectedCount))
-            : t("stores.unselected")}
+      {isPending && (
+        <div className="rounded-lg border bg-background p-12 text-center text-sm text-muted-foreground">
+          加载中...
         </div>
-        <DropdownMenu
-          align="right"
-          trigger={
-            <button
-              type="button"
-              disabled={selectedCount === 0 || busy}
-              className="rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t("stores.batchMenu")}
-            </button>
-          }
-        >
-          <DropdownItem
-            disabled={!ASSET_TRIGGER_AVAILABLE || busy}
-            onClick={onBatchPullAssets}
-          >
-            {t("stores.batch.pullAssets")}
-            {!ASSET_TRIGGER_AVAILABLE && (
-              <span className="ml-1 text-[10px] text-muted-foreground">{t("stores.pendingBackend")}</span>
-            )}
-          </DropdownItem>
-          <DropdownItem
-            variant="destructive"
-            disabled={!STORE_DISABLE_AVAILABLE || busy}
-            onClick={onBatchDisable}
-          >
-            {t("stores.batch.disable")}
-            {!STORE_DISABLE_AVAILABLE && (
-              <span className="ml-1 text-[10px] opacity-70">{t("stores.pendingBackend")}</span>
-            )}
-          </DropdownItem>
-        </DropdownMenu>
-      </div>
+      )}
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="w-10 px-3 py-2 text-left">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  ref={(el) => {
-                    if (el) el.indeterminate = someSelected;
-                  }}
-                  onChange={toggleAll}
-                  aria-label={t("stores.selectAll")}
-                />
-              </th>
-              <th className="px-3 py-2 text-left">{t("stores.column.id")}</th>
-              <th className="px-3 py-2 text-left">{t("stores.column.domain")}</th>
-              <th className="px-3 py-2 text-left">{t("stores.column.brand")}</th>
-              <th className="px-3 py-2 text-left">{t("stores.column.tokenType")}</th>
-              <th className="px-3 py-2 text-left">{t("stores.column.status")}</th>
-              <th className="px-3 py-2 text-left">{t("stores.column.created")}</th>
-              <th className="px-3 py-2 text-right">{t("stores.column.actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isPending && (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">{t("common.loading")}</td></tr>
-            )}
-            {!isPending && stores.length === 0 && (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">{t("stores.empty")}</td></tr>
-            )}
-            {stores.map((s) => {
-              const cls = STATUS_CLS[s.status] ?? STATUS_CLS.DISABLED;
-              const text = STATUS_TEXT[s.status] ?? STATUS_TEXT.DISABLED;
-              const checked = selected.has(s.id);
-              return (
-                <tr key={s.id} className={"border-t " + (checked ? "bg-blue-50/40" : "")}>
-                  <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleOne(s.id)}
-                      aria-label={t("stores.selectRow").replace("{domain}", s.myshopifyDomain)}
-                    />
-                  </td>
-                  <td className="px-3 py-2">{s.id}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{s.myshopifyDomain}</td>
-                  <td className="px-3 py-2">{s.brandName || "-"}</td>
-                  <td className="px-3 py-2 text-xs">
-                    <span className="rounded border px-1.5 py-0.5 font-mono">{s.tokenType}</span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={"inline-block rounded border px-2 py-0.5 text-xs " + cls}>
-                      {text}
+      {!isPending && stores.length === 0 && (
+        <div className="rounded-lg border bg-background p-12 text-center">
+          <p className="text-sm text-muted-foreground">暂无店铺</p>
+          <Link
+            href="/stores/new"
+            className="mt-3 inline-block rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+          >
+            接入第一个店铺
+          </Link>
+        </div>
+      )}
+
+      {/* 卡片网格 */}
+      {!isPending && stores.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {stores.map((s) => {
+            const days = tokenDaysLeft(s.expiresAt);
+            const status = STATUS_INFO[s.status] ?? STATUS_INFO.DISABLED;
+            return (
+              <article
+                key={s.id}
+                className="flex flex-col rounded-lg border bg-background p-4 transition-shadow hover:shadow-sm"
+              >
+                {/* 顶部：国旗 + 域名 + 状态 */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <span className="text-2xl leading-none" aria-hidden>
+                      {flagFor(s.myshopifyDomain)}
                     </span>
-                  </td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {new Date(s.createdAt).toLocaleString("zh-CN")}
-                  </td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <div className="min-w-0">
+                      <div
+                        className="truncate font-mono text-sm font-medium"
+                        title={s.myshopifyDomain}
+                      >
+                        {s.myshopifyDomain}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {planLabel(s)}
+                      </div>
+                    </div>
+                  </div>
+                  <span
+                    className={
+                      "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide " +
+                      status.cls
+                    }
+                  >
+                    {status.label}
+                  </span>
+                </div>
+
+                {/* 三列指标 */}
+                <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
+                  <div>
+                    <div className="text-[11px] text-muted-foreground">GMV</div>
+                    <div
+                      className="mt-0.5 font-semibold tabular-nums"
+                      title="GMV 数据待 W3 接 Shopify orders.json 后填充"
+                    >
+                      {fmtGmv(s.gmv)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-muted-foreground">订单</div>
+                    <div
+                      className="mt-0.5 font-semibold tabular-nums"
+                      title="订单数据待 W3 接 Shopify orders.json 后填充"
+                    >
+                      {fmtNumber(s.orderCount)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-muted-foreground">产品</div>
+                    <div className="mt-0.5 font-semibold tabular-nums">
+                      {fmtNumber(s.productCount ?? 0)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 底部：token 天数 + 操作 */}
+                <div className="mt-4 flex items-center justify-between gap-2 border-t pt-3">
+                  <span
+                    className={
+                      "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] " +
+                      tokenBadgeClass(days)
+                    }
+                  >
+                    <span aria-hidden>⏱</span>
+                    {tokenBadgeText(days)}
+                  </span>
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
+                      title="健康检查"
                       disabled={!!healthChecking[s.id]}
                       onClick={() => onHealthCheck(s.id)}
-                      className="rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
-                      title={t("stores.healthCheckTip")}
+                      className="rounded p-1.5 text-muted-foreground hover:bg-accent disabled:opacity-50"
+                      aria-label="健康检查"
                     >
-                      {healthChecking[s.id] ? t("stores.healthChecking") : t("stores.healthCheck")}
+                      {healthChecking[s.id] ? "⌛" : "👁"}
                     </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    <DropdownMenu
+                      align="right"
+                      trigger={
+                        <button
+                          type="button"
+                          className="rounded p-1.5 text-muted-foreground hover:bg-accent"
+                          aria-label="更多操作"
+                          title="更多操作"
+                        >
+                          ⚙
+                        </button>
+                      }
+                    >
+                      <DropdownItem onClick={() => router.push(`/stores/${s.id}`)}>
+                        查看详情
+                      </DropdownItem>
+                      <DropdownItem onClick={() => onTogglePartnerCollab(s)}>
+                        {s.isPartnerCollab ? "取消合作店标记" : "标记为合作店"}
+                      </DropdownItem>
+                      {s.status === "ACTIVE" && (
+                        <DropdownItem onClick={() => onDisable(s)}>
+                          暂停店铺
+                        </DropdownItem>
+                      )}
+                      <DropdownItem variant="destructive" onClick={() => onDelete(s)}>
+                        删除店铺
+                      </DropdownItem>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

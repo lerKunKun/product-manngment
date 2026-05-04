@@ -12,6 +12,12 @@ export type StoreItem = {
   isDevStore?: boolean;
   isPartnerCollab?: boolean;
   createdAt: string;
+  /** 活跃产品数（store_product 中 status=ACTIVE 的行数） */
+  productCount?: number;
+  /** GMV 占位；W3 接 Shopify orders 后填 */
+  gmv?: number | null;
+  /** 订单数占位 */
+  orderCount?: number | null;
 };
 
 export const storeApi = {
