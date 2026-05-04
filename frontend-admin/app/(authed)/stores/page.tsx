@@ -48,8 +48,17 @@ const STATUS_INFO: Record<
   },
 };
 
-/** plan 推断：当前后端没有 shopify_plan 字段，临时按 isDevStore 区分 */
+/** plan 推断：优先用后端 shopifyPlan（plan_name），回退按 isDevStore / Partner 标记。
+ *  Shopify 常见 plan_name：affiliate / partner_test / shopify_alumni / basic / professional /
+ *  unlimited / shopify_plus / enterprise / dev / staff_business / etc. */
 function planLabel(s: StoreItem): string {
+  const raw = (s.shopifyPlan ?? "").toLowerCase();
+  if (raw.includes("plus")) return "Shopify Plus";
+  if (raw.includes("enterprise")) return "Shopify Plus";
+  if (raw.includes("partner_test") || raw === "dev") return "Dev";
+  if (raw.includes("staff_business")) return "Staff";
+  if (raw.includes("affiliate")) return "Affiliate";
+  if (raw && !raw.includes("partner")) return "Shopify";
   if (s.isDevStore) return "Dev";
   if (s.isPartnerCollab) return "Partner Dev";
   return "Shopify";
@@ -79,11 +88,22 @@ function fmtNumber(n: number | null | undefined): string {
   if (n == null) return "—";
   return new Intl.NumberFormat("en-US").format(n);
 }
-function fmtGmv(n: number | null | undefined): string {
-  if (n == null) return "—";
-  // 显示成「¥218.4 万」格式（按截图）；GMV 后端没数据先占位，未来真实值按值切换 K/W 单位
-  if (n >= 10000) return `¥${(n / 10000).toFixed(1)} 万`;
-  return `¥${n.toFixed(2)}`;
+
+const CCY_SYMBOL: Record<string, string> = {
+  USD: "$", CNY: "¥", EUR: "€", GBP: "£", JPY: "¥",
+  AUD: "A$", CAD: "C$", HKD: "HK$", SGD: "S$",
+};
+/** 按本币显示 GMV：≥10k 折成「N.N 万」（CNY/JPY 习惯），否则带 2 位小数 */
+function fmtGmv(raw: number | string | null | undefined, currency?: string | null): string {
+  if (raw == null || raw === "") return "—";
+  const n = typeof raw === "string" ? Number(raw) : raw;
+  if (!Number.isFinite(n)) return "—";
+  const sym = CCY_SYMBOL[(currency ?? "USD").toUpperCase()] ?? `${currency ?? ""} `;
+  const useWan = (currency ?? "USD").toUpperCase() === "CNY" || (currency ?? "").toUpperCase() === "JPY";
+  if (useWan && n >= 10000) return `${sym}${(n / 10000).toFixed(1)} 万`;
+  if (n >= 1_000_000) return `${sym}${(n / 1_000_000).toFixed(2)} M`;
+  if (n >= 10_000) return `${sym}${(n / 1_000).toFixed(1)} K`;
+  return `${sym}${n.toFixed(2)}`;
 }
 
 const SENSITIVE_DELETE = "STORE_DELETE";
@@ -108,6 +128,22 @@ export default function StoresPage() {
   }, [stores]);
 
   const [healthChecking, setHealthChecking] = useState<Record<number, boolean>>({});
+  const [refreshing, setRefreshing] = useState<Record<number, boolean>>({});
+
+  async function onRefreshMetrics(s: StoreItem) {
+    setRefreshing((m) => ({ ...m, [s.id]: true }));
+    try {
+      const r = await storeApi.refreshMetrics(s.id);
+      if (r.result === "SUCCESS") toast.success(`#${s.id} 指标已刷新`);
+      else if (r.result === "SKIPPED") toast.warn(`#${s.id} 已跳过（token 缺失）`);
+      else toast.error(`#${s.id} 刷新失败`);
+      invalidate();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRefreshing((m) => ({ ...m, [s.id]: false }));
+    }
+  }
 
   async function onHealthCheck(id: number) {
     setHealthChecking((m) => ({ ...m, [id]: true }));
@@ -254,9 +290,13 @@ export default function StoresPage() {
                     <div className="text-[11px] text-muted-foreground">GMV</div>
                     <div
                       className="mt-0.5 font-semibold tabular-nums"
-                      title="GMV 数据待 W3 接 Shopify orders.json 后填充"
+                      title={
+                        s.metricsFetchedAt
+                          ? `近 30 天 paid 订单 GMV\n刷新于：${new Date(s.metricsFetchedAt).toLocaleString("zh-CN")}`
+                          : "尚未刷新；点右下角 ⚙ → 刷新指标"
+                      }
                     >
-                      {fmtGmv(s.gmv)}
+                      {fmtGmv(s.gmv, s.metricsCurrency)}
                     </div>
                   </div>
                   <div>
@@ -313,6 +353,12 @@ export default function StoresPage() {
                     >
                       <DropdownItem onClick={() => router.push(`/stores/${s.id}`)}>
                         查看详情
+                      </DropdownItem>
+                      <DropdownItem
+                        disabled={!!refreshing[s.id]}
+                        onClick={() => onRefreshMetrics(s)}
+                      >
+                        {refreshing[s.id] ? "刷新中..." : "刷新指标（plan / GMV）"}
                       </DropdownItem>
                       <DropdownItem onClick={() => onTogglePartnerCollab(s)}>
                         {s.isPartnerCollab ? "取消合作店标记" : "标记为合作店"}

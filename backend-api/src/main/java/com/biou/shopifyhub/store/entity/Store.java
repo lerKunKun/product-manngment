@@ -33,6 +33,17 @@ public class Store {
     /** ACTIVE / DISABLED / TOKEN_EXPIRED / UNINSTALLED */
     private String status;
 
+    /** V31: Shopify 套餐 plan_name（shop.json 拉到） */
+    private String shopifyPlan;
+    /** V31: 近 30 天 paid 订单 GMV */
+    private java.math.BigDecimal gmv30d;
+    /** V31: 近 30 天 paid 订单数 */
+    private Integer orderCount30d;
+    /** V31: 订单本币 ISO 4217 */
+    private String metricsCurrency;
+    /** V31: 上次刷新指标时间 */
+    private LocalDateTime metricsFetchedAt;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)
@@ -70,6 +81,16 @@ public class Store {
     public void setIsPartnerCollab(Boolean isPartnerCollab) { this.isPartnerCollab = isPartnerCollab; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getShopifyPlan() { return shopifyPlan; }
+    public void setShopifyPlan(String shopifyPlan) { this.shopifyPlan = shopifyPlan; }
+    public java.math.BigDecimal getGmv30d() { return gmv30d; }
+    public void setGmv30d(java.math.BigDecimal gmv30d) { this.gmv30d = gmv30d; }
+    public Integer getOrderCount30d() { return orderCount30d; }
+    public void setOrderCount30d(Integer orderCount30d) { this.orderCount30d = orderCount30d; }
+    public String getMetricsCurrency() { return metricsCurrency; }
+    public void setMetricsCurrency(String metricsCurrency) { this.metricsCurrency = metricsCurrency; }
+    public LocalDateTime getMetricsFetchedAt() { return metricsFetchedAt; }
+    public void setMetricsFetchedAt(LocalDateTime metricsFetchedAt) { this.metricsFetchedAt = metricsFetchedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

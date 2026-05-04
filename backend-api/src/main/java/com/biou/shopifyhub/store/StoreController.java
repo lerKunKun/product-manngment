@@ -25,12 +25,15 @@ public class StoreController {
     private final StoreService service;
     private final ShopifyApiClient shopify;
     private final StoreProductMapper storeProductMapper;
+    private final StoreMetricsService metricsService;
 
     public StoreController(StoreService service, ShopifyApiClient shopify,
-                           StoreProductMapper storeProductMapper) {
+                           StoreProductMapper storeProductMapper,
+                           StoreMetricsService metricsService) {
         this.service = service;
         this.shopify = shopify;
         this.storeProductMapper = storeProductMapper;
+        this.metricsService = metricsService;
     }
 
     @GetMapping
@@ -74,10 +77,12 @@ public class StoreController {
             m.put("createdAt", s.getCreatedAt());
             // 卡片版 UI 需要：已上架活跃产品数
             m.put("productCount", productCountByStore.getOrDefault(s.getId(), 0L));
-            // GMV / 订单数：当前后端无聚合源（需打 Shopify Admin orders.json + 时间窗），
-            // 占位 null 让前端显示「—」；待 W3 接 Shopify orders 后再填
-            m.put("gmv", null);
-            m.put("orderCount", null);
+            // V31：plan + 30d GMV/订单数 + 本币（StoreMetricsService 定时刷写到表）
+            m.put("shopifyPlan", s.getShopifyPlan());
+            m.put("gmv", s.getGmv30d());
+            m.put("orderCount", s.getOrderCount30d());
+            m.put("metricsCurrency", s.getMetricsCurrency());
+            m.put("metricsFetchedAt", s.getMetricsFetchedAt());
             return m;
         }).toList();
         return Result.ok(dto);
@@ -89,6 +94,13 @@ public class StoreController {
         if (uid == null) uid = 1L;
         Long id = service.connectCustomApp(req, uid);
         return Result.ok(Map.of("storeId", id));
+    }
+
+    /** 手动触发店铺指标刷新（plan + 30d GMV/订单数）。同步调用，订单多时可能 30s+。 */
+    @PostMapping("/{id}/refresh-metrics")
+    public Result<Map<String, Object>> refreshMetrics(@PathVariable Long id) {
+        StoreMetricsService.RefreshResult r = metricsService.refreshById(id);
+        return Result.ok(Map.of("storeId", id, "result", r.name()));
     }
 
     /** 删除店铺是危险操作 */

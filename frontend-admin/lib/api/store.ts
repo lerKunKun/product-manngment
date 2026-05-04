@@ -14,10 +14,16 @@ export type StoreItem = {
   createdAt: string;
   /** 活跃产品数（store_product 中 status=ACTIVE 的行数） */
   productCount?: number;
-  /** GMV 占位；W3 接 Shopify orders 后填 */
-  gmv?: number | null;
-  /** 订单数占位 */
+  /** Shopify plan_name（V31 拉自 shop.json，每天定时刷） */
+  shopifyPlan?: string | null;
+  /** 近 30 天 paid 订单 GMV（V31，按 metricsCurrency） */
+  gmv?: number | string | null;
+  /** 近 30 天 paid 订单数 */
   orderCount?: number | null;
+  /** 订单本币 ISO 4217 */
+  metricsCurrency?: string | null;
+  /** 上次刷新指标时间 */
+  metricsFetchedAt?: string | null;
 };
 
 export const storeApi = {
@@ -101,6 +107,13 @@ export const storeApi = {
     api.post<void>(`/store/${id}/disable`, null, {
       headers: { "X-Sensitive-Token": sensitiveToken },
     }),
+
+  /** V31: 手动触发店铺指标（plan + 30d GMV/订单数）刷新。同步调用，可能 30s+。 */
+  refreshMetrics: (id: number) =>
+    api.post<{ storeId: number; result: "SUCCESS" | "FAILED" | "SKIPPED" }>(
+      `/store/${id}/refresh-metrics`,
+      null
+    ),
 };
 
 /** T10：后端已实现批量禁用 / 健康检查 endpoint，开启。 */

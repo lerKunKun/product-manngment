@@ -117,7 +117,99 @@ public class ShopifyApiClient {
         return s.length() > max ? s.substring(0, max) : s;
     }
 
+    /**
+     * 拉近 30 天 paid 订单聚合（GMV + 订单数 + 本币）。
+     *
+     * <p>实现：调 GET /admin/api/{ver}/orders.json?status=any&financial_status=paid&
+     *   created_at_min=&fields=id,total_price,currency&limit=250&page_info=...
+     * REST 翻页通过响应 Link header 的 rel="next" page_info；最多拉 MAX_PAGES 页防失控
+     * （10 页 = 2500 单足以覆盖大多数中型店）。订单多时可能 30s+，调用方应在后台跑。
+     *
+     * <p>失败时返 ok=false + error，调用方决定是否覆盖旧值。本币取首单 currency。
+     */
+    public OrdersMetric fetchOrders30dMetric(String myshopifyDomain, String accessToken) {
+        final int MAX_PAGES = 10;
+        try {
+            String since = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC)
+                .minusDays(30)
+                .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            String url = apiBaseUrl + myshopifyDomain + "/admin/api/" + apiVersion
+                + "/orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,currency"
+                + "&created_at_min=" + java.net.URLEncoder.encode(since, java.nio.charset.StandardCharsets.UTF_8);
+
+            java.math.BigDecimal gmv = java.math.BigDecimal.ZERO;
+            int count = 0;
+            String currency = null;
+            int pages = 0;
+            while (url != null && pages < MAX_PAGES) {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .header("X-Shopify-Access-Token", accessToken)
+                    .timeout(Duration.ofSeconds(20))
+                    .GET().build();
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 401 || resp.statusCode() == 403) {
+                    return new OrdersMetric(false, null, 0, null, null,
+                        "token rejected HTTP " + resp.statusCode());
+                }
+                if (resp.statusCode() != 200) {
+                    return new OrdersMetric(false, null, 0, null, null,
+                        "HTTP " + resp.statusCode() + ": " + snip(resp.body(), 200));
+                }
+                JsonNode orders = JSON.readTree(resp.body()).path("orders");
+                if (orders.isArray()) {
+                    for (JsonNode o : orders) {
+                        String tp = o.path("total_price").asText(null);
+                        if (tp != null) {
+                            try { gmv = gmv.add(new java.math.BigDecimal(tp)); } catch (Exception ignored) {}
+                        }
+                        if (currency == null) {
+                            String c = o.path("currency").asText(null);
+                            if (c != null && !c.isBlank()) currency = c;
+                        }
+                        count++;
+                    }
+                }
+                // REST 翻页：Link: <...&page_info=xyz>; rel="next"
+                url = parseNextLink(resp.headers().firstValue("Link").orElse(null), apiBaseUrl, myshopifyDomain, apiVersion);
+                pages++;
+            }
+            return new OrdersMetric(true,
+                gmv.setScale(2, java.math.RoundingMode.HALF_UP),
+                count,
+                currency != null ? currency : "USD",
+                java.time.Instant.now(),
+                null);
+        } catch (Exception e) {
+            log.warn("Shopify fetchOrders30dMetric error domain={} err={}",
+                myshopifyDomain, e.getMessage());
+            return new OrdersMetric(false, null, 0, null, null,
+                e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /** 从 Link header 抠下一页绝对 URL；找不到返 null（终止翻页）。 */
+    private static String parseNextLink(String linkHeader, String base, String domain, String version) {
+        if (linkHeader == null || linkHeader.isBlank()) return null;
+        // 形如：<https://shop.myshopify.com/admin/api/.../orders.json?page_info=xxx&limit=250>; rel="next", <...>; rel="previous"
+        for (String part : linkHeader.split(",")) {
+            String s = part.trim();
+            if (!s.contains("rel=\"next\"")) continue;
+            int lt = s.indexOf('<'), gt = s.indexOf('>');
+            if (lt < 0 || gt < 0 || gt <= lt + 1) return null;
+            return s.substring(lt + 1, gt);
+        }
+        return null;
+    }
+
     public record ShopInfo(boolean ok, String name, String error) {}
     public record TokenExchangeResult(boolean ok, String accessToken, String scope, String error) {}
     public record ShopDetail(boolean ok, int statusCode, String name, String planName, String error) {}
+    public record OrdersMetric(
+        boolean ok,
+        java.math.BigDecimal gmv,
+        int orderCount,
+        String currency,
+        java.time.Instant fetchedAt,
+        String error
+    ) {}
 }
