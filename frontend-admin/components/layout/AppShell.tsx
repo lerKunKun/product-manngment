@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n/context";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetHeader, SheetTitle, SheetContent } from "@/components/ui/Sheet";
+import { HeaderInfoBar } from "@/components/layout/HeaderInfoBar";
 
 type NavGroup = {
   section: string | null;
@@ -223,6 +224,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ☰
           </button>
           <div className="flex items-center gap-3">
+            <HeaderInfoBar />
             <button
               type="button"
               onClick={toggleTheme}
