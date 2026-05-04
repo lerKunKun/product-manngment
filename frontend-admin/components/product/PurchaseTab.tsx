@@ -11,8 +11,11 @@ import type { ApiError } from "@/lib/api/client";
 const inpSm =
   "rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
+type Currency = "USD" | "CNY";
+
 type Draft = {
   cost: string;
+  currency: Currency;
   grossWeight: string;
   logisticsTags: string;
   purchaseUrl: string;
@@ -22,12 +25,15 @@ type Draft = {
 function toDraft(r: PurchaseInfo): Draft {
   return {
     cost: r.cost == null ? "" : String(r.cost),
+    currency: (r.currency === "USD" || r.currency === "CNY" ? r.currency : "CNY") as Currency,
     grossWeight: r.grossWeight == null ? "" : String(r.grossWeight),
     logisticsTags: r.logisticsTags ?? "",
     purchaseUrl: r.purchaseUrl ?? "",
     note: r.note ?? "",
   };
 }
+
+const CURRENCY_SYMBOL: Record<Currency, string> = { USD: "$", CNY: "¥" };
 
 const SYNC_BADGE: Record<string, { v: BadgeVariant; label: string }> = {
   PENDING: { v: "warning", label: "PENDING" },
@@ -75,6 +81,7 @@ export function PurchaseTab({ productId }: { productId: number }) {
     const original = toDraft(row);
     if (
       d.cost === original.cost &&
+      d.currency === original.currency &&
       d.grossWeight === original.grossWeight &&
       d.logisticsTags === original.logisticsTags &&
       d.purchaseUrl === original.purchaseUrl &&
@@ -84,6 +91,7 @@ export function PurchaseTab({ productId }: { productId: number }) {
     }
     const body: Partial<PurchaseInfo> = {
       cost: d.cost === "" ? undefined : Number(d.cost),
+      currency: d.currency,
       grossWeight: d.grossWeight === "" ? undefined : Number(d.grossWeight),
       logisticsTags: d.logisticsTags || undefined,
       purchaseUrl: d.purchaseUrl || undefined,
@@ -108,7 +116,7 @@ export function PurchaseTab({ productId }: { productId: number }) {
           <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-2 py-2 text-left">SKU</th>
-              <th className="px-2 py-2 text-right">采购成本</th>
+              <th className="px-2 py-2 text-right">采购成本（$ / ¥）</th>
               <th className="px-2 py-2 text-right">克重 (g)</th>
               <th className="px-2 py-2 text-left">物流标签</th>
               <th className="px-2 py-2 text-left">采购链接</th>
@@ -141,14 +149,48 @@ export function PurchaseTab({ productId }: { productId: number }) {
                     </div>
                   </td>
                   <td className="px-2 py-2 text-right">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={d.cost}
-                      onChange={(e) => setField(r.variantId, "cost", e.target.value)}
-                      onBlur={() => commit(r)}
-                      className={inpSm + " w-24 text-right"}
-                    />
+                    <div className="inline-flex items-center gap-1">
+                      {/* 币种切换 toggle —— 默认 CNY，可切到 USD；commit 时一并发后端 */}
+                      <div
+                        className="inline-flex overflow-hidden rounded border text-[11px]"
+                        role="group"
+                        aria-label="币种"
+                      >
+                        {(["USD", "CNY"] as const).map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => {
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [r.variantId]: { ...prev[r.variantId], currency: c },
+                              }));
+                              // 切币种立即提交（与原 onBlur 行为一致）
+                              setTimeout(() => commit(r), 0);
+                            }}
+                            className={
+                              "px-1.5 py-0.5 " +
+                              (d.currency === c
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:bg-accent")
+                            }
+                          >
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {CURRENCY_SYMBOL[d.currency]}
+                      </span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={d.cost}
+                        onChange={(e) => setField(r.variantId, "cost", e.target.value)}
+                        onBlur={() => commit(r)}
+                        className={inpSm + " w-24 text-right"}
+                      />
+                    </div>
                   </td>
                   <td className="px-2 py-2 text-right">
                     <input

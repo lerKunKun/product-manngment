@@ -44,4 +44,23 @@
 @layer base {
   * { @apply border-border; }
   body { @apply bg-background text-foreground; }
+
+  /* 全局禁用 <input type="number"> 的上下调节按钮（spinner）—— 价格 / 重量 /
+     库存等输入框需要键盘直接输入精确值，spinner 容易误点。
+     如果某处确实需要 spinner，给 input 加 class="show-spin" 走豁免规则。*/
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+  input[type="number"].show-spin::-webkit-outer-spin-button,
+  input[type="number"].show-spin::-webkit-inner-spin-button {
+    -webkit-appearance: auto;
+  }
+  input[type="number"].show-spin {
+    -moz-appearance: auto;
+  }
 }

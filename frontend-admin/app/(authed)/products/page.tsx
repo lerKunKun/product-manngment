@@ -17,7 +17,8 @@ function formatPrice(price: number | string | null | undefined): string {
   if (price == null) return "-";
   const n = typeof price === "string" ? Number(price) : price;
   if (!Number.isFinite(n)) return "-";
-  return `¥${n.toFixed(2)}`;
+  // 产品销售价统一 USD（Shopify 端门店本币；本平台展示 USD）
+  return `$${n.toFixed(2)}`;
 }
 
 export default function ProductsPage() {

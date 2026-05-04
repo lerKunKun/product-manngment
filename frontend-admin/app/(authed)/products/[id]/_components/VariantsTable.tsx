@@ -142,7 +142,7 @@ export function VariantsTable({
                   </th>
                 ))
               )}
-              <th className="px-2 py-2 text-right">价格</th>
+              <th className="px-2 py-2 text-right">价格 (USD)</th>
               <th className="px-2 py-2 text-left">SKU</th>
               <th className="px-2 py-2 text-right">库存</th>
               <th className="px-2 py-2 text-right">操作</th>
@@ -212,20 +212,25 @@ export function VariantsTable({
 
                   <td className="px-2 py-2 text-right">
                     {isEdit ? (
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={String(draft.price ?? 0)}
-                        onChange={(e) =>
-                          setDraft({
-                            ...draft,
-                            price: e.target.value as unknown as number,
-                          })
-                        }
-                        className={inpSm + " w-24 text-right"}
-                      />
+                      <div className="inline-flex items-center gap-1">
+                        <span className="text-xs text-muted-foreground">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={String(draft.price ?? 0)}
+                          onChange={(e) =>
+                            setDraft({
+                              ...draft,
+                              price: e.target.value as unknown as number,
+                            })
+                          }
+                          className={inpSm + " w-24 text-right"}
+                        />
+                      </div>
+                    ) : v.price != null ? (
+                      `$${Number(v.price).toFixed(2)}`
                     ) : (
-                      v.price
+                      "-"
                     )}
                   </td>
                   <td className="px-2 py-2 font-mono text-xs">
