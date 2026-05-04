@@ -7,6 +7,8 @@ import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.push.entity.StoreProduct;
 import com.biou.shopifyhub.push.mapper.StoreProductMapper;
 import com.biou.shopifyhub.store.entity.Store;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -26,14 +28,17 @@ public class StoreController {
     private final ShopifyApiClient shopify;
     private final StoreProductMapper storeProductMapper;
     private final StoreMetricsService metricsService;
+    private final ObjectMapper objectMapper;
 
     public StoreController(StoreService service, ShopifyApiClient shopify,
                            StoreProductMapper storeProductMapper,
-                           StoreMetricsService metricsService) {
+                           StoreMetricsService metricsService,
+                           ObjectMapper objectMapper) {
         this.service = service;
         this.shopify = shopify;
         this.storeProductMapper = storeProductMapper;
         this.metricsService = metricsService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping
@@ -77,12 +82,21 @@ public class StoreController {
             m.put("createdAt", s.getCreatedAt());
             // 卡片版 UI 需要：已上架活跃产品数
             m.put("productCount", productCountByStore.getOrDefault(s.getId(), 0L));
-            // V31：plan + 30d GMV/订单数 + 本币（StoreMetricsService 定时刷写到表）
+            // V31/V32：plan + 5 时间窗 GMV/订单数（today/week/month/year/ytd）
             m.put("shopifyPlan", s.getShopifyPlan());
-            m.put("gmv", s.getGmv30d());
-            m.put("orderCount", s.getOrderCount30d());
             m.put("metricsCurrency", s.getMetricsCurrency());
             m.put("metricsFetchedAt", s.getMetricsFetchedAt());
+            // metrics_periods 列存 JSON：解析成对象返给前端，避免前端二次解析
+            if (s.getMetricsPeriods() != null && !s.getMetricsPeriods().isBlank()) {
+                try {
+                    m.put("metricsPeriods", objectMapper.readValue(
+                        s.getMetricsPeriods(), new TypeReference<Map<String, Object>>() {}));
+                } catch (Exception e) {
+                    m.put("metricsPeriods", null);
+                }
+            } else {
+                m.put("metricsPeriods", null);
+            }
             return m;
         }).toList();
         return Result.ok(dto);

@@ -1,10 +1,15 @@
 "use client";
 
 // TODO i18n: 卡片版重写后中文 hardcoded；后续抽到 messages.ts
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { storeApi, type StoreItem } from "@/lib/api/store";
+import {
+  storeApi,
+  type StoreItem,
+  type MetricsPeriod,
+  METRICS_PERIOD_LABEL,
+} from "@/lib/api/store";
 import { useStores, useInvalidateStores } from "@/lib/queries/stores";
 import { useToast } from "@/components/ui/Toast";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
@@ -89,6 +94,12 @@ function fmtNumber(n: number | null | undefined): string {
   return new Intl.NumberFormat("en-US").format(n);
 }
 
+/** 跳到 Shopify Admin 后台。biou-jp.myshopify.com → admin.shopify.com/store/biou-jp */
+function shopifyAdminUrl(domain: string): string {
+  const prefix = domain.replace(/\.myshopify\.com$/, "");
+  return `https://admin.shopify.com/store/${prefix}`;
+}
+
 const CCY_SYMBOL: Record<string, string> = {
   USD: "$", CNY: "¥", EUR: "€", GBP: "£", JPY: "¥",
   AUD: "A$", CAD: "C$", HKD: "HK$", SGD: "S$",
@@ -129,6 +140,10 @@ export default function StoresPage() {
 
   const [healthChecking, setHealthChecking] = useState<Record<number, boolean>>({});
   const [refreshing, setRefreshing] = useState<Record<number, boolean>>({});
+  /** 5 个时间窗 tab 当前选中（产品级一次切换不影响数据，只切显示） */
+  const [period, setPeriod] = useState<MetricsPeriod>("month");
+  /** mount 自动批量刷新一次（避免每次切回页面都刷）；用 ref 防 strict mode 双触发 */
+  const autoRefreshedRef = useRef(false);
 
   async function onRefreshMetrics(s: StoreItem) {
     setRefreshing((m) => ({ ...m, [s.id]: true }));
@@ -144,6 +159,41 @@ export default function StoresPage() {
       setRefreshing((m) => ({ ...m, [s.id]: false }));
     }
   }
+
+  /** 进页面 mount 自动批量刷新（并发 3，避免一起打 Shopify 速率限制）。 */
+  useEffect(() => {
+    if (autoRefreshedRef.current) return;
+    if (isPending || stores.length === 0) return;
+    autoRefreshedRef.current = true;
+
+    const ids = stores.map((s) => s.id);
+    const CONCURRENT = 3;
+    let cursor = 0;
+
+    setRefreshing((m) => {
+      const next = { ...m };
+      ids.forEach((id) => (next[id] = true));
+      return next;
+    });
+
+    async function worker() {
+      while (cursor < ids.length) {
+        const id = ids[cursor++];
+        try {
+          await storeApi.refreshMetrics(id);
+        } catch {
+          /* 单店失败不阻断其他 */
+        } finally {
+          setRefreshing((m) => ({ ...m, [id]: false }));
+        }
+      }
+    }
+
+    Promise.all(Array.from({ length: CONCURRENT }, worker)).then(() => {
+      invalidate();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPending, stores.length]);
 
   async function onHealthCheck(id: number) {
     setHealthChecking((m) => ({ ...m, [id]: true }));
@@ -221,6 +271,28 @@ export default function StoresPage() {
         </Link>
       </div>
 
+      {/* 时间窗切换：影响所有卡片的 GMV / 订单数显示（产品数与时间无关，不变） */}
+      <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-muted/20 p-1 text-xs">
+        {(["today", "week", "month", "year", "ytd"] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => setPeriod(p)}
+            className={
+              "rounded px-3 py-1.5 transition-colors " +
+              (period === p
+                ? "bg-background font-medium shadow-sm"
+                : "text-muted-foreground hover:text-foreground")
+            }
+          >
+            {METRICS_PERIOD_LABEL[p]}
+          </button>
+        ))}
+        <span className="ml-auto text-[11px] text-muted-foreground">
+          数据来自 Shopify orders.json · 进页面自动刷新一次
+        </span>
+      </div>
+
       {errorMsg && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
           {errorMsg}
@@ -284,37 +356,40 @@ export default function StoresPage() {
                   </span>
                 </div>
 
-                {/* 三列指标 */}
-                <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
-                  <div>
-                    <div className="text-[11px] text-muted-foreground">GMV</div>
-                    <div
-                      className="mt-0.5 font-semibold tabular-nums"
-                      title={
-                        s.metricsFetchedAt
-                          ? `近 30 天 paid 订单 GMV\n刷新于：${new Date(s.metricsFetchedAt).toLocaleString("zh-CN")}`
-                          : "尚未刷新；点右下角 ⚙ → 刷新指标"
-                      }
-                    >
-                      {fmtGmv(s.gmv, s.metricsCurrency)}
+                {/* 三列指标 — GMV / 订单按当前 period；产品数与时间无关 */}
+                {(() => {
+                  const bucket = s.metricsPeriods?.[period];
+                  const ccy = s.metricsPeriods?.currency ?? s.metricsCurrency ?? null;
+                  const fetchedAtTitle = s.metricsFetchedAt
+                    ? `${METRICS_PERIOD_LABEL[period]} paid 订单 GMV\n刷新于：${new Date(s.metricsFetchedAt).toLocaleString("zh-CN")}`
+                    : "尚未刷新或 token 缺失；点右下 ↻ 重试";
+                  return (
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <div className="text-[11px] text-muted-foreground">
+                          GMV · {METRICS_PERIOD_LABEL[period]}
+                        </div>
+                        <div className="mt-0.5 font-semibold tabular-nums" title={fetchedAtTitle}>
+                          {fmtGmv(bucket?.gmv, ccy)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-muted-foreground">
+                          订单 · {METRICS_PERIOD_LABEL[period]}
+                        </div>
+                        <div className="mt-0.5 font-semibold tabular-nums" title={fetchedAtTitle}>
+                          {fmtNumber(bucket?.orders ?? null)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-muted-foreground">产品</div>
+                        <div className="mt-0.5 font-semibold tabular-nums">
+                          {fmtNumber(s.productCount ?? 0)}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-muted-foreground">订单</div>
-                    <div
-                      className="mt-0.5 font-semibold tabular-nums"
-                      title="订单数据待 W3 接 Shopify orders.json 后填充"
-                    >
-                      {fmtNumber(s.orderCount)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-muted-foreground">产品</div>
-                    <div className="mt-0.5 font-semibold tabular-nums">
-                      {fmtNumber(s.productCount ?? 0)}
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* 底部：token 天数 + 操作 */}
                 <div className="mt-4 flex items-center justify-between gap-2 border-t pt-3">
@@ -328,9 +403,32 @@ export default function StoresPage() {
                     {tokenBadgeText(days)}
                   </span>
                   <div className="flex items-center gap-1">
+                    {/* 独立刷新按钮 */}
                     <button
                       type="button"
-                      title="健康检查"
+                      title="刷新指标（plan / GMV / 订单数）"
+                      disabled={!!refreshing[s.id]}
+                      onClick={() => onRefreshMetrics(s)}
+                      className="rounded p-1.5 text-muted-foreground hover:bg-accent disabled:opacity-50"
+                      aria-label="刷新指标"
+                    >
+                      <span className={refreshing[s.id] ? "inline-block animate-spin" : ""}>↻</span>
+                    </button>
+                    {/* 跳 Shopify Admin 后台 */}
+                    <a
+                      href={shopifyAdminUrl(s.myshopifyDomain)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`在 Shopify Admin 打开 ${s.myshopifyDomain}`}
+                      className="rounded p-1.5 text-muted-foreground hover:bg-accent"
+                      aria-label="打开 Shopify Admin"
+                    >
+                      ↗
+                    </a>
+                    {/* 健康检查 */}
+                    <button
+                      type="button"
+                      title="健康检查（验证 token）"
                       disabled={!!healthChecking[s.id]}
                       onClick={() => onHealthCheck(s.id)}
                       className="rounded p-1.5 text-muted-foreground hover:bg-accent disabled:opacity-50"
@@ -352,13 +450,7 @@ export default function StoresPage() {
                       }
                     >
                       <DropdownItem onClick={() => router.push(`/stores/${s.id}`)}>
-                        查看详情
-                      </DropdownItem>
-                      <DropdownItem
-                        disabled={!!refreshing[s.id]}
-                        onClick={() => onRefreshMetrics(s)}
-                      >
-                        {refreshing[s.id] ? "刷新中..." : "刷新指标（plan / GMV）"}
+                        平台内详情
                       </DropdownItem>
                       <DropdownItem onClick={() => onTogglePartnerCollab(s)}>
                         {s.isPartnerCollab ? "取消合作店标记" : "标记为合作店"}

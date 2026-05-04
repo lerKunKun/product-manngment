@@ -43,6 +43,8 @@ public class Store {
     private String metricsCurrency;
     /** V31: 上次刷新指标时间 */
     private LocalDateTime metricsFetchedAt;
+    /** V32: 5 个时间窗 GMV/订单聚合 JSON（today/week/month/year/ytd + currency） */
+    private String metricsPeriods;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
@@ -91,6 +93,8 @@ public class Store {
     public void setMetricsCurrency(String metricsCurrency) { this.metricsCurrency = metricsCurrency; }
     public LocalDateTime getMetricsFetchedAt() { return metricsFetchedAt; }
     public void setMetricsFetchedAt(LocalDateTime metricsFetchedAt) { this.metricsFetchedAt = metricsFetchedAt; }
+    public String getMetricsPeriods() { return metricsPeriods; }
+    public void setMetricsPeriods(String metricsPeriods) { this.metricsPeriods = metricsPeriods; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

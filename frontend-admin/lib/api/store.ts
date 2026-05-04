@@ -14,16 +14,30 @@ export type StoreItem = {
   createdAt: string;
   /** 活跃产品数（store_product 中 status=ACTIVE 的行数） */
   productCount?: number;
-  /** Shopify plan_name（V31 拉自 shop.json，每天定时刷） */
+  /** Shopify plan_name（V31 拉自 shop.json） */
   shopifyPlan?: string | null;
-  /** 近 30 天 paid 订单 GMV（V31，按 metricsCurrency） */
-  gmv?: number | string | null;
-  /** 近 30 天 paid 订单数 */
-  orderCount?: number | null;
   /** 订单本币 ISO 4217 */
   metricsCurrency?: string | null;
   /** 上次刷新指标时间 */
   metricsFetchedAt?: string | null;
+  /** V32: 5 时间窗聚合 + currency。null = 还没刷过或失败 */
+  metricsPeriods?: {
+    today?: { gmv: number | string; orders: number };
+    week?: { gmv: number | string; orders: number };
+    month?: { gmv: number | string; orders: number };
+    year?: { gmv: number | string; orders: number };
+    ytd?: { gmv: number | string; orders: number };
+    currency?: string;
+  } | null;
+};
+
+export type MetricsPeriod = "today" | "week" | "month" | "year" | "ytd";
+export const METRICS_PERIOD_LABEL: Record<MetricsPeriod, string> = {
+  today: "今日",
+  week: "近 7 天",
+  month: "近 30 天",
+  year: "近 365 天",
+  ytd: "本年至今",
 };
 
 export const storeApi = {

@@ -62,7 +62,9 @@ public class ShopifyOAuthController {
     private static final String OAUTH_SCOPES =
         "read_themes,write_themes,read_files,write_files,"
       + "read_products,write_products,read_collections,write_collections,"
-      + "read_content,write_content,read_locales,write_locales";
+      + "read_content,write_content,read_locales,write_locales,"
+      // V32: 店铺管理卡片需读 orders.json 拉 GMV/订单数（5 个时间窗）
+      + "read_orders";
 
     public ShopifyOAuthController(StoreMapper storeMapper, ShopifyApiClient shopify, StringRedisTemplate redis) {
         this.storeMapper = storeMapper;

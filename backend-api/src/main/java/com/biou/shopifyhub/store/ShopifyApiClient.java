@@ -201,6 +201,100 @@ public class ShopifyApiClient {
         return null;
     }
 
+    /**
+     * 拉一次 365d paid 订单 → 后端分 5 桶（today / week / month / year / ytd）。
+     *
+     * <p>实现：单次 created_at_min = max(today-365d, year-01-01) 拉够；REST 翻页 page_info；
+     * 最多 MAX_PAGES 页防失控（订单很多的店要警惕）。每条 order 仅取
+     * id, total_price, currency, created_at（fields 限制减包大小）。
+     *
+     * <p>桶定义：
+     * <ul>
+     *   <li>today：UTC 今天 00:00:00 之后</li>
+     *   <li>week：当前时刻 -7d 之后</li>
+     *   <li>month：当前时刻 -30d 之后</li>
+     *   <li>year：当前时刻 -365d 之后</li>
+     *   <li>ytd：当前年 01-01 00:00:00 之后</li>
+     * </ul>
+     */
+    public OrdersBundle fetchOrdersBucketed(String myshopifyDomain, String accessToken) {
+        final int MAX_PAGES = 20;
+        try {
+            java.time.Instant now = java.time.Instant.now();
+            java.time.OffsetDateTime nowUtc = now.atOffset(java.time.ZoneOffset.UTC);
+            java.time.Instant ytdStart = nowUtc.toLocalDate()
+                .withDayOfYear(1)
+                .atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+            java.time.Instant year365 = now.minus(java.time.Duration.ofDays(365));
+            java.time.Instant since = ytdStart.isBefore(year365) ? ytdStart : year365;
+
+            String url = apiBaseUrl + myshopifyDomain + "/admin/api/" + apiVersion
+                + "/orders.json?status=any&financial_status=paid&limit=250"
+                + "&fields=id,total_price,currency,created_at"
+                + "&created_at_min=" + java.net.URLEncoder.encode(
+                    since.atOffset(java.time.ZoneOffset.UTC).format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                    java.nio.charset.StandardCharsets.UTF_8);
+
+            java.time.Instant todayStart = nowUtc.toLocalDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+            java.time.Instant week7d = now.minus(java.time.Duration.ofDays(7));
+            java.time.Instant month30d = now.minus(java.time.Duration.ofDays(30));
+
+            Bucket today = new Bucket(), week = new Bucket(), month = new Bucket(),
+                   year = new Bucket(), ytd = new Bucket();
+            String currency = null;
+            int pages = 0;
+            while (url != null && pages < MAX_PAGES) {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .header("X-Shopify-Access-Token", accessToken)
+                    .timeout(Duration.ofSeconds(20))
+                    .GET().build();
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 401 || resp.statusCode() == 403) {
+                    return new OrdersBundle(false, null, null, null, null, null, null, null,
+                        "token rejected HTTP " + resp.statusCode());
+                }
+                if (resp.statusCode() != 200) {
+                    return new OrdersBundle(false, null, null, null, null, null, null, null,
+                        "HTTP " + resp.statusCode() + ": " + snip(resp.body(), 200));
+                }
+                JsonNode orders = JSON.readTree(resp.body()).path("orders");
+                if (orders.isArray()) {
+                    for (JsonNode o : orders) {
+                        String tp = o.path("total_price").asText(null);
+                        java.math.BigDecimal price = java.math.BigDecimal.ZERO;
+                        if (tp != null) {
+                            try { price = new java.math.BigDecimal(tp); } catch (Exception ignored) {}
+                        }
+                        if (currency == null) {
+                            String c = o.path("currency").asText(null);
+                            if (c != null && !c.isBlank()) currency = c;
+                        }
+                        String ts = o.path("created_at").asText(null);
+                        if (ts == null) continue;
+                        java.time.Instant t;
+                        try { t = java.time.OffsetDateTime.parse(ts).toInstant(); }
+                        catch (Exception e) { continue; }
+
+                        if (!t.isBefore(todayStart)) today.add(price);
+                        if (!t.isBefore(week7d)) week.add(price);
+                        if (!t.isBefore(month30d)) month.add(price);
+                        if (!t.isBefore(year365)) year.add(price);
+                        if (!t.isBefore(ytdStart)) ytd.add(price);
+                    }
+                }
+                url = parseNextLink(resp.headers().firstValue("Link").orElse(null), apiBaseUrl, myshopifyDomain, apiVersion);
+                pages++;
+            }
+            return new OrdersBundle(true, today, week, month, year, ytd,
+                currency != null ? currency : "USD", java.time.Instant.now(), null);
+        } catch (Exception e) {
+            log.warn("Shopify fetchOrdersBucketed error domain={} err={}",
+                myshopifyDomain, e.getMessage());
+            return new OrdersBundle(false, null, null, null, null, null, null, null,
+                e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
     public record ShopInfo(boolean ok, String name, String error) {}
     public record TokenExchangeResult(boolean ok, String accessToken, String scope, String error) {}
     public record ShopDetail(boolean ok, int statusCode, String name, String planName, String error) {}
@@ -208,6 +302,21 @@ public class ShopifyApiClient {
         boolean ok,
         java.math.BigDecimal gmv,
         int orderCount,
+        String currency,
+        java.time.Instant fetchedAt,
+        String error
+    ) {}
+
+    /** 单个时间窗的累加器。 */
+    public static final class Bucket {
+        public java.math.BigDecimal gmv = java.math.BigDecimal.ZERO;
+        public int orders = 0;
+        void add(java.math.BigDecimal price) { gmv = gmv.add(price); orders++; }
+    }
+
+    public record OrdersBundle(
+        boolean ok,
+        Bucket today, Bucket week, Bucket month, Bucket year, Bucket ytd,
         String currency,
         java.time.Instant fetchedAt,
         String error

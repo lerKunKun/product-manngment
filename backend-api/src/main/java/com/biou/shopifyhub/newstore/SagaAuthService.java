@@ -40,11 +40,13 @@ public class SagaAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(SagaAuthService.class);
 
-    /** Shopify install 默认 scopes。覆盖后续 saga 步骤所需：products / themes / files / collections / metafields。 */
+    /** Shopify install 默认 scopes。覆盖后续 saga 步骤所需：products / themes / files / collections / metafields；
+     *  + V32 店铺管理卡片读 orders.json 算 GMV/订单数。 */
     private static final String OAUTH_SCOPES =
         "read_themes,write_themes,read_files,write_files,"
       + "read_products,write_products,read_collections,write_collections,"
-      + "read_content,write_content,read_locales,write_locales";
+      + "read_content,write_content,read_locales,write_locales,"
+      + "read_orders";
 
     private final SagaService sagaService;
     private final StoreMapper storeMapper;

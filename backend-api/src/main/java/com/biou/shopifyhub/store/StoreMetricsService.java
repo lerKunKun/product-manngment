@@ -1,38 +1,33 @@
 package com.biou.shopifyhub.store;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.biou.shopifyhub.store.entity.Store;
 import com.biou.shopifyhub.store.mapper.StoreMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * 把店铺的 plan + 30d GMV/订单数刷新到 store 表，前端 list 直接读字段。
+ * 把店铺的 plan + 5 时间窗 GMV/订单数刷到 store 表。
  *
- * <p>触发路径：
- * <ul>
- *   <li>定时（cron）：默认每天 03:30 全量刷一次 ACTIVE 店</li>
- *   <li>手动：StoreController#refreshMetrics 调本类 refreshOne</li>
- *   <li>接入新店：未来可在 connectCustomApp / SagaAuthService 落库后调用一次（本期未自动接，避免接入路径变重）</li>
- * </ul>
+ * <p>触发：手动（StoreController#refreshMetrics）+ 前端进店铺管理页 mount 时
+ * 批量调一次（避免 cron 一直空转）。本 service 不带定时任务。
  *
  * <p>刷新流程（每店）：
  * <ol>
- *   <li>解密 token；token 缺失或解密失败 → 跳过（写日志，不动旧值）</li>
- *   <li>fetchShopDetail → 拿 plan_name 写 shopify_plan</li>
- *   <li>fetchOrders30dMetric → 拿 GMV / 订单数 / currency 写 metrics_*</li>
- *   <li>无论 plan / orders 哪一个失败，**只覆盖成功的那部分**，另一部分保留旧值</li>
+ *   <li>解密 token；token 缺失 → SKIPPED</li>
+ *   <li>fetchShopDetail → plan_name 写 shopify_plan</li>
+ *   <li>fetchOrdersBucketed → 5 桶 (today/week/month/year/ytd) + currency
+ *       → 序列化成 JSON 写 metrics_periods 列；同时写 metrics_currency 和 metrics_fetched_at</li>
+ *   <li>plan / orders 任一成功就 update 该字段；都失败 → FAILED 不动旧值</li>
  * </ol>
  *
- * <p>风险：orders.json 数据多时 30s+ 单店；按 ACTIVE 店逐个串行，避免 Shopify
- * REST 速率限制（标准 2 req/s / Plus 4 req/s）。如店铺过多需要 cron 跑很久，
- * 后续可改成多节点分片。
+ * <p>风险：fetchOrdersBucketed 单次拉至多 365d 订单（最多 20 页 = 5000 单），
+ * 大店可能 30s+。串行调用避免速率限制。
  */
 @Service
 public class StoreMetricsService {
@@ -42,37 +37,17 @@ public class StoreMetricsService {
     private final StoreMapper storeMapper;
     private final StoreService storeService;
     private final ShopifyApiClient shopify;
+    private final ObjectMapper mapper;
 
-    public StoreMetricsService(StoreMapper storeMapper, StoreService storeService, ShopifyApiClient shopify) {
+    public StoreMetricsService(StoreMapper storeMapper, StoreService storeService,
+                               ShopifyApiClient shopify, ObjectMapper mapper) {
         this.storeMapper = storeMapper;
         this.storeService = storeService;
         this.shopify = shopify;
+        this.mapper = mapper;
     }
 
-    /** 每天 03:30（秒 分 时 日 月 周）全量刷新 ACTIVE 店；env SHOPIFY_METRICS_REFRESH_CRON 可覆盖。 */
-    @Scheduled(cron = "${shopify.metrics.refresh-cron:0 30 3 * * *}")
-    public void refreshAllScheduled() {
-        log.info("[store-metrics] scheduled refresh starting");
-        long ok = 0, fail = 0, skip = 0;
-        List<Store> stores = storeMapper.selectList(
-            new QueryWrapper<Store>().eq("status", "ACTIVE")
-        );
-        for (Store s : stores) {
-            try {
-                RefreshResult r = refreshOne(s);
-                if (r == RefreshResult.SUCCESS) ok++;
-                else if (r == RefreshResult.SKIPPED) skip++;
-                else fail++;
-            } catch (Exception e) {
-                log.warn("[store-metrics] refresh failed storeId={} err={}", s.getId(), e.getMessage());
-                fail++;
-            }
-        }
-        log.info("[store-metrics] scheduled refresh done ok={} fail={} skip={} total={}",
-            ok, fail, skip, stores.size());
-    }
-
-    /** 手动触发某店刷新。返回结果让 controller 反馈给前端。 */
+    /** 手动触发某店刷新。 */
     public RefreshResult refreshById(long storeId) {
         Store s = storeMapper.selectById(storeId);
         if (s == null) return RefreshResult.SKIPPED;
@@ -101,17 +76,26 @@ public class StoreMetricsService {
             log.warn("[store-metrics] plan fetch threw storeId={} err={}", s.getId(), e.getMessage());
         }
 
-        // 2) orders 30d
+        // 2) orders 5 桶
         try {
-            ShopifyApiClient.OrdersMetric m = shopify.fetchOrders30dMetric(s.getMyshopifyDomain(), accessToken);
-            if (m.ok()) {
-                s.setGmv30d(m.gmv());
-                s.setOrderCount30d(m.orderCount());
-                s.setMetricsCurrency(m.currency());
+            ShopifyApiClient.OrdersBundle b = shopify.fetchOrdersBucketed(s.getMyshopifyDomain(), accessToken);
+            if (b.ok()) {
+                Map<String, Object> periods = new LinkedHashMap<>();
+                periods.put("today", bucketJson(b.today()));
+                periods.put("week", bucketJson(b.week()));
+                periods.put("month", bucketJson(b.month()));
+                periods.put("year", bucketJson(b.year()));
+                periods.put("ytd", bucketJson(b.ytd()));
+                periods.put("currency", b.currency());
+                s.setMetricsPeriods(mapper.writeValueAsString(periods));
+                s.setMetricsCurrency(b.currency());
                 s.setMetricsFetchedAt(LocalDateTime.now());
+                // 兼容 V31 字段：30d 当成 month 桶值塞回（某些旧 caller 仍读这俩）
+                s.setGmv30d(b.month().gmv);
+                s.setOrderCount30d(b.month().orders);
                 ordersUpdated = true;
             } else {
-                log.debug("[store-metrics] orders fetch failed storeId={} err={}", s.getId(), m.error());
+                log.debug("[store-metrics] orders fetch failed storeId={} err={}", s.getId(), b.error());
             }
         } catch (Exception e) {
             log.warn("[store-metrics] orders fetch threw storeId={} err={}", s.getId(), e.getMessage());
@@ -122,6 +106,13 @@ public class StoreMetricsService {
             return RefreshResult.SUCCESS;
         }
         return RefreshResult.FAILED;
+    }
+
+    private static Map<String, Object> bucketJson(ShopifyApiClient.Bucket b) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("gmv", b.gmv);
+        m.put("orders", b.orders);
+        return m;
     }
 
     private String decryptOrNull(Store s) {
