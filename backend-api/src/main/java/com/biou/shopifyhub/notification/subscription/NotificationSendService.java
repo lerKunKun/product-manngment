@@ -11,6 +11,7 @@ import com.biou.shopifyhub.notification.subscription.mapper.NotificationLogMappe
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -41,6 +42,14 @@ public class NotificationSendService {
     private final InappBridge inappBridge;
     private final MetricsRegistry metricsRegistry;
 
+    /** EMAIL 通道总开关：dev 没配 SMTP 时设 false 可避免每条失败通知都跑去尝试连 SMTP。 */
+    @Value("${notification.email.enabled:true}")
+    private boolean emailEnabled;
+
+    /** DINGTALK 通道总开关：dev 没钉钉配置时同理可关。 */
+    @Value("${notification.dingtalk.enabled:true}")
+    private boolean dingtalkEnabled;
+
     @Autowired
     public NotificationSendService(SubscriptionService subscriptionService,
                                    SysUserMapper userMapper,
@@ -56,6 +65,11 @@ public class NotificationSendService {
         this.emailService = emailService;
         this.inappBridge = inappBridge;
         this.metricsRegistry = metricsRegistry;
+    }
+
+    private boolean channelDisabled(String ch) {
+        return ("EMAIL".equals(ch) && !emailEnabled)
+            || ("DINGTALK".equals(ch) && !dingtalkEnabled);
     }
 
     /**
@@ -76,6 +90,10 @@ public class NotificationSendService {
             if (!subscriptionService.isSubscribed(userId, eventCode, ch)) {
                 continue;
             }
+            if (channelDisabled(ch)) {
+                log.debug("[ntf-skip] channel disabled by config ch={} event={}", ch, eventCode);
+                continue;
+            }
             NotificationLog row = insertPending(u, eventCode, ch, subject, bodyText);
             try {
                 String err = sendOne(u, ch, subject, bodyText, bodyHtml);
@@ -85,7 +103,9 @@ public class NotificationSendService {
                     markFailed(row.getId(), err, 1);
                 }
             } catch (Exception e) {
-                log.error("[ntf-send] event={} user={} ch={} failed", eventCode, userId, ch, e);
+                // 底层失败已记入 notification_log；用 WARN + 短消息，不再 dump stack 污染日志
+                log.warn("[ntf-send] event={} user={} ch={} failed: {}",
+                    eventCode, userId, ch, e.getMessage());
                 markFailed(row.getId(), e.getMessage(), 1);
             }
         }
@@ -100,6 +120,11 @@ public class NotificationSendService {
             markSkipped(row.getId(), "user vanished");
             return false;
         }
+        if (channelDisabled(row.getChannel())) {
+            // 配置已关，没必要继续重试，让它停在 SKIPPED
+            markSkipped(row.getId(), "channel disabled by config");
+            return false;
+        }
         int next = row.getAttemptCount() == null ? 1 : row.getAttemptCount() + 1;
         try {
             String err = sendOne(u, row.getChannel(), row.getSubject(), row.getBodyText(), null);
@@ -110,6 +135,8 @@ public class NotificationSendService {
             markFailed(row.getId(), err, next);
             return false;
         } catch (Exception e) {
+            log.warn("[ntf-retry] logId={} ch={} failed: {}",
+                row.getId(), row.getChannel(), e.getMessage());
             markFailed(row.getId(), e.getMessage(), next);
             return false;
         }

@@ -55,6 +55,12 @@ spring:
       mail.smtp.timeout: 10000
       mail.smtp.writetimeout: 10000
 
+# dev 默认关 EMAIL 通道：避免 PRODUCT_PUSH_FAIL 等失败通知去尝试 biou SMTP（连不通就 4 次 SSLHandshake 噪音）
+# 想本地真发邮件测试：export NOTIFICATION_EMAIL_ENABLED=true 启动
+notification:
+  email:
+    enabled: ${NOTIFICATION_EMAIL_ENABLED:false}
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

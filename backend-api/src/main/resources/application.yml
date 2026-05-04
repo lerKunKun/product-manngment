@@ -43,6 +43,14 @@ springdoc:
     path: /swagger-ui.html
     enabled: ${SWAGGER_ENABLED:true}
 
+notification:
+  email:
+    # 默认开（生产用）。dev 没配真 SMTP 就 export NOTIFICATION_EMAIL_ENABLED=false 关掉，
+    # 避免 PRODUCT_PUSH_FAIL 等失败通知反复跑去尝试连不通的 SMTP，污染日志。
+    enabled: ${NOTIFICATION_EMAIL_ENABLED:true}
+  dingtalk:
+    enabled: ${NOTIFICATION_DINGTALK_ENABLED:true}
+
 logging:
   level:
     com.biou.shopifyhub: DEBUG
