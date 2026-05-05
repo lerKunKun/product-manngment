@@ -13,11 +13,15 @@ import {
 
 /**
  * 立即触发产品快照（替换原 prompt() UI）。
- * - 店铺通过下拉选择，避免手输 storeId。
- * - 产品 external_id 优先从 store_product 映射自动回填（push 后已建立映射的店铺）；
- *   未映射的店铺允许手填（首次拉取/纯 Shopify 端建产品的兼容路径）。
- * - 提交时同时把本平台 product.id 透传给后端，免去后端反查 store_product 失败
- *   导致的 product_snapshot.product_id 入库 NULL。
+ *
+ * 设计：
+ *  - 只展示**该产品已成功 push 过、能在 Shopify 端拉到**的店铺。判定方式：
+ *    store_product 映射 + shopifyProductId 非空。没 push 过的店铺压根不出现
+ *    在下拉里，避免用户手填错值导致后端反查失败 → product_id 入库 NULL。
+ *  - external_id 直接从映射读出，input 只读展示。
+ *  - 提交时同时把本平台 product.id 透传给后端，让 product_snapshot.product_id
+ *    一定能正确落库。
+ *  - 没任何映射时空态提示 "该产品尚未推送到任何店铺"。
  */
 export function SnapshotTriggerDialog({
   open,
@@ -29,18 +33,16 @@ export function SnapshotTriggerDialog({
   product: { id: number; handle: string; title: string };
 }) {
   const toast = useToast();
+  // stores 列表只用于查 tenantId（mappings 没带 tenantId 字段）
   const [stores, setStores] = useState<StoreItem[]>([]);
-  const [storeId, setStoreId] = useState<number | "">("");
-  const [externalId, setExternalId] = useState<string>("");
-  const [externalIdManual, setExternalIdManual] = useState(false);
   const [mappings, setMappings] = useState<StoreProductMapping[]>([]);
-  const [loadingStores, setLoadingStores] = useState(false);
+  const [storeId, setStoreId] = useState<number | "">("");
+  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // 一次性拉取本产品的所有 store_product 映射（push 过的店铺会有 shopify_product_id）
   useEffect(() => {
     if (!open) return;
-    setLoadingStores(true);
+    setLoading(true);
     Promise.all([
       storeApi.list().catch(() => [] as StoreItem[]),
       storeProductApi.listForProduct(product.id).catch(() => [] as StoreProductMapping[]),
@@ -49,65 +51,46 @@ export function SnapshotTriggerDialog({
         setStores(s ?? []);
         setMappings(m ?? []);
       })
-      .finally(() => setLoadingStores(false));
+      .finally(() => setLoading(false));
   }, [open, product.id]);
 
-  // 关闭时清空一次性输入，避免下次打开还残留上次的值。
   useEffect(() => {
     if (!open) {
       setStoreId("");
-      setExternalId("");
-      setExternalIdManual(false);
       setMappings([]);
     }
   }, [open]);
 
-  // 选店铺时：从 mappings 自动回填 externalId（如果该店铺已 push 过本产品）
-  const mappingForStore = useMemo(
-    () => (storeId ? mappings.find((m) => m.storeId === storeId) : undefined),
-    [storeId, mappings]
+  // 只保留"已 push 成功"的映射：必须有 shopifyProductId（push 完成后才回填）
+  const eligibleMappings = useMemo(
+    () =>
+      mappings.filter(
+        (m) => m.shopifyProductId != null && m.shopifyProductId.trim() !== ""
+      ),
+    [mappings]
   );
-  useEffect(() => {
-    if (!storeId) {
-      setExternalId("");
-      setExternalIdManual(false);
-      return;
-    }
-    if (mappingForStore?.shopifyProductId) {
-      setExternalId(mappingForStore.shopifyProductId);
-      setExternalIdManual(false);
-    } else {
-      // 没映射 → 用户手填
-      setExternalId("");
-      setExternalIdManual(true);
-    }
-  }, [storeId, mappingForStore]);
+  const selectedMapping = useMemo(
+    () => (storeId ? eligibleMappings.find((m) => m.storeId === storeId) : undefined),
+    [storeId, eligibleMappings]
+  );
 
   async function submit() {
-    if (!storeId) {
+    if (!selectedMapping) {
       toast.warn("请先选择目标店铺");
       return;
     }
-    const trimmed = externalId.trim();
-    if (!trimmed) {
-      toast.warn("请填写产品在 Shopify 的 ID");
-      return;
-    }
-    const store = stores.find((s) => s.id === storeId);
-    if (!store) {
-      toast.error("店铺不存在");
-      return;
-    }
-    // 后端返回的 StoreItem 当前类型未枚举 tenantId；缺失时回退到 1（与旧 prompt 行为一致）。
-    const tenantId = store.tenantId ?? 1;
+    const externalId = selectedMapping.shopifyProductId!.trim();
+    const store = stores.find((s) => s.id === selectedMapping.storeId);
+    // 后端返回的 StoreItem 类型未枚举 tenantId；缺失回退到 1（与旧 prompt 行为一致）
+    const tenantId = store?.tenantId ?? 1;
+
     setSubmitting(true);
     try {
-      // 第 4 个参数 product.id 是关键：让后端 product_snapshot.product_id 直接落本平台 id
       const r = await productSnapshotApi.manual(
-        Number(storeId),
-        trimmed,
+        selectedMapping.storeId,
+        externalId,
         tenantId,
-        product.id
+        product.id // 关键：让后端直接落 product_snapshot.product_id
       );
       if (r.queued) {
         toast.success(`快照已入队 (snapshotId=${r.snapshotId})`);
@@ -139,7 +122,7 @@ export function SnapshotTriggerDialog({
           <button
             type="button"
             onClick={submit}
-            disabled={submitting}
+            disabled={submitting || !selectedMapping}
             className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
             {submitting && <Spinner className="mr-1" />}确认
@@ -152,57 +135,49 @@ export function SnapshotTriggerDialog({
       </div>
       <div>
         <label className="mb-1 block text-xs text-muted-foreground">目标店铺</label>
-        {loadingStores ? (
+        {loading ? (
           <Spinner />
-        ) : stores.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            暂无可用店铺，先去“店铺”菜单连接一个 Shopify 店铺。
+        ) : eligibleMappings.length === 0 ? (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            该产品尚未推送到任何店铺。先在产品详情顶部「推送」到至少一家店铺后再来触发快照。
           </p>
         ) : (
           <select
             value={storeId}
-            onChange={(e) =>
-              setStoreId(e.target.value ? Number(e.target.value) : "")
-            }
+            onChange={(e) => setStoreId(e.target.value ? Number(e.target.value) : "")}
             className="w-full rounded-md border bg-background px-2 py-1.5"
           >
             <option value="">— 请选择 —</option>
-            {stores.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.brandName ?? s.myshopifyDomain} ({s.myshopifyDomain})
+            {eligibleMappings.map((m) => (
+              <option key={m.storeId} value={m.storeId}>
+                {(m.storeBrand ?? m.storeDomain ?? `Store #${m.storeId}`)}
+                {m.storeDomain ? ` (${m.storeDomain})` : ""}
               </option>
             ))}
           </select>
         )}
       </div>
-      <div>
-        <label className="mb-1 block text-xs text-muted-foreground">
-          Shopify 产品 ID（external_id）
-        </label>
-        <input
-          value={externalId}
-          onChange={(e) => {
-            setExternalId(e.target.value);
-            setExternalIdManual(true);
-          }}
-          placeholder={
-            storeId
-              ? mappingForStore?.shopifyProductId
-                ? "已自动回填"
-                : "例如 9876543210（该店铺未推送过此产品，需手填）"
-              : "请先选择目标店铺"
-          }
-          disabled={!storeId}
-          className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs disabled:opacity-50"
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          {storeId
-            ? mappingForStore?.shopifyProductId && !externalIdManual
-              ? `✓ 已从 store_product 映射回填（产品在该店铺的 Shopify ID）`
-              : "该店铺未推送过此产品，请手填 Shopify 端的 product_external_id"
-            : "选择店铺后会自动尝试从映射回填"}
-        </p>
-      </div>
+      {selectedMapping && (
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Shopify 产品 ID（external_id）
+          </label>
+          <input
+            value={selectedMapping.shopifyProductId ?? ""}
+            readOnly
+            className="w-full rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs text-muted-foreground"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            ✓ 自该店铺的 store_product 映射读取
+            {selectedMapping.lastPushedAt && (
+              <>
+                ；上次推送：
+                {new Date(selectedMapping.lastPushedAt).toLocaleString("zh-CN")}
+              </>
+            )}
+          </p>
+        </div>
+      )}
     </Dialog>
   );
 }
