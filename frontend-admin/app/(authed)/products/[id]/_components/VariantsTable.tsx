@@ -1,7 +1,7 @@
 "use client";
 
 // TODO i18n
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   productApi,
   type ProductOption,
@@ -10,25 +10,19 @@ import {
 } from "@/lib/api/product";
 import type { ApiError } from "@/lib/api/client";
 
-const inpSm =
-  "rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
-
-type BatchField = "price" | "inventoryQty";
-
 /**
- * 变体表（Shopify 风格批量编辑）。
+ * 变体表（参照 Shopify Admin → Product → Variants）。
  *
- * 列头按 product_option.position **升序**动态展示（"颜色 / 尺寸 / 材质"），
- * 之后是 Price / SKU / 库存 / 操作。
+ * 三段式布局：
+ *  1. **选项块**（卡片）：每个 product_option 显示 name + 该选项的全部已用值（chip）。
+ *     option_name 缺失时退化为 "选项 1 / 选项 2 / 选项 3"（按 position）。
+ *     "+ 添加选项" 当前为占位：后端 ProductOptionController 只暴露 GET，CRUD 待补。
+ *  2. **批量操作条**（仅选中 ≥1 时出现）：[价格] / [库存] popover 输入框 + [删除]
+ *  3. **变体表**：checkbox · 图 · 变体名 (option1/2/3 拼接) + SKU 副标题 · 价格输入 · 库存输入 · ⋮
+ *     价格 / 库存默认就是 input 直接编辑，blur 自动 save —— 不再需要"编辑"按钮。
+ *  4. **总库存** 底部行
  *
- * 交互：
- *  - 每行 checkbox + 表头全选；选中 ≥1 时顶部出现批量操作条
- *  - 批量改 价格 / 库存 → popover 输入新值 → 循环 variantUpdate
- *  - 批量删除 → confirm 后循环 variantDelete
- *  - 单行编辑（编辑 / 改 SKU / 删除）保留旧逻辑
- *
- * 后端没批量端点；几十条产品变体规模下前端串行循环可接受，进度条 / partial
- * 失败汇报由 onMessage 拼接成功 / 失败计数。
+ * 单行的"改 SKU"放进 ⋮ 菜单（高敏走 @RequireSensitiveOp）；"删除"也在 ⋮。
  */
 export function VariantsTable({
   productId,
@@ -45,27 +39,80 @@ export function VariantsTable({
   onChange: () => void;
   onMessage: (msg: string) => void;
 }) {
-  const [editing, setEditing] = useState<number | null>(null);
-  const [draft, setDraft] = useState<Partial<ProductVariant>>({});
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  // 批量编辑 popover：'price' / 'inventoryQty' / null
-  const [batchField, setBatchField] = useState<BatchField | null>(null);
+  // 批量编辑 popover
+  const [batchField, setBatchField] = useState<"price" | "inventoryQty" | null>(
+    null
+  );
   const [batchValue, setBatchValue] = useState("");
   const [batchApplying, setBatchApplying] = useState(false);
+  // 行内输入 draft：行 id → 字段 → 字符串值（受控，blur 提交）
+  const [drafts, setDrafts] = useState<
+    Record<number, { price: string; inventoryQty: string }>
+  >({});
+  // 行级 ⋮ 菜单的 open id（一次只开一个）
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // option name 列头：按 position 升序，最多 3 列（schema 上限）
-  const optionCols = useMemo(
-    () => [...options].sort((a, b) => a.position - b.position).slice(0, 3),
-    [options]
-  );
+  // 初始化 / 同步行 draft（外部 variants 变 → reset）
+  useEffect(() => {
+    const next: Record<number, { price: string; inventoryQty: string }> = {};
+    for (const v of variants) {
+      next[v.id] = {
+        price: v.price == null ? "" : String(v.price),
+        inventoryQty: v.inventoryQty == null ? "" : String(v.inventoryQty),
+      };
+    }
+    setDrafts(next);
+  }, [variants]);
+
+  // 点外面关 ⋮ 菜单
+  useEffect(() => {
+    if (openMenuId == null) return;
+    function onDoc(e: MouseEvent) {
+      if (!menuRef.current?.contains(e.target as Node)) setOpenMenuId(null);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [openMenuId]);
+
   const fallbackImg = images[0]?.src;
 
+  // 总库存
+  const totalInventory = useMemo(
+    () => variants.reduce((sum, v) => sum + (Number(v.inventoryQty) || 0), 0),
+    [variants]
+  );
+
+  // 选项块数据：按 position 1/2/3 各取一组（option_name 优先用 product_option，没就退化）
+  const optionBlocks = useMemo(() => {
+    const optionsByPos = new Map<number, ProductOption>();
+    for (const o of options) optionsByPos.set(o.position, o);
+    const blocks: { position: number; name: string; values: string[] }[] = [];
+    for (const pos of [1, 2, 3] as const) {
+      const valueSet = new Set<string>();
+      for (const v of variants) {
+        const val =
+          pos === 1 ? v.option1 : pos === 2 ? v.option2 : v.option3;
+        if (val && val.trim()) valueSet.add(val.trim());
+      }
+      const named = optionsByPos.get(pos);
+      if (valueSet.size === 0 && !named) continue;
+      blocks.push({
+        position: pos,
+        name: named?.name ?? `选项 ${pos}`,
+        values: [...valueSet],
+      });
+    }
+    return blocks;
+  }, [options, variants]);
+
+  // 行选择
   const allChecked =
     variants.length > 0 && selectedIds.size === variants.length;
   const indeterminate =
     selectedIds.size > 0 && selectedIds.size < variants.length;
-
   function toggleAll() {
     if (allChecked) setSelectedIds(new Set());
     else setSelectedIds(new Set(variants.map((v) => v.id)));
@@ -84,30 +131,48 @@ export function VariantsTable({
     setBatchValue("");
   }
 
-  function variantOptionValue(v: ProductVariant, position: number): string {
-    if (position === 1) return v.option1 ?? "";
-    if (position === 2) return v.option2 ?? "";
-    if (position === 3) return v.option3 ?? "";
-    return "";
+  // 行 draft 控制
+  function setRowField(
+    id: number,
+    field: "price" | "inventoryQty",
+    val: string
+  ) {
+    setDrafts((d) => ({ ...d, [id]: { ...d[id], [field]: val } }));
   }
-  function setDraftOptionValue(position: number, value: string) {
-    if (position === 1) setDraft((d) => ({ ...d, option1: value }));
-    else if (position === 2) setDraft((d) => ({ ...d, option2: value }));
-    else if (position === 3) setDraft((d) => ({ ...d, option3: value }));
-  }
-
-  async function save() {
-    if (!editing) return;
+  /** blur 时如有变化则 save 单字段 */
+  async function commitRow(v: ProductVariant, field: "price" | "inventoryQty") {
+    const d = drafts[v.id];
+    if (!d) return;
+    const original =
+      field === "price"
+        ? v.price == null
+          ? ""
+          : String(v.price)
+        : v.inventoryQty == null
+          ? ""
+          : String(v.inventoryQty);
+    if (d[field] === original) return;
     try {
-      await productApi.variantUpdate(editing, draft);
-      onMessage("✓ 变体已保存");
-      setEditing(null);
-      setDraft({});
+      const patch: Partial<ProductVariant> =
+        field === "inventoryQty"
+          ? { inventoryQty: Number(d[field]) }
+          : { price: d[field] as unknown as number };
+      await productApi.variantUpdate(v.id, patch);
       onChange();
     } catch (e) {
       onMessage((e as ApiError).message);
+      // 失败回滚 draft
+      setDrafts((dr) => ({
+        ...dr,
+        [v.id]: {
+          ...dr[v.id],
+          [field]: original,
+        },
+      }));
     }
   }
+
+  // 行级操作
   async function addNew() {
     try {
       const r = await productApi.variantCreate(productId, {
@@ -123,7 +188,7 @@ export function VariantsTable({
       onMessage((e as ApiError).message);
     }
   }
-  async function del(v: ProductVariant) {
+  async function delOne(v: ProductVariant) {
     if (!confirm(`删除变体 #${v.id} (SKU: ${v.sku})？`)) return;
     try {
       await productApi.variantDelete(v.id);
@@ -152,9 +217,7 @@ export function VariantsTable({
     }
   }
 
-  // ===== 批量操作 =====
-
-  /** 串行循环调单行 update；汇总成功 / 失败计数。 */
+  // 批量
   async function applyBatch() {
     if (!batchField || selectedIds.size === 0) return;
     const raw = batchValue.trim();
@@ -181,15 +244,14 @@ export function VariantsTable({
     setBatchApplying(false);
     onMessage(
       fail === 0
-        ? `✓ 批量更新 ${batchField === "price" ? "价格" : "库存"}（${ok}/${ids.length}）`
-        : `批量更新部分失败：成功 ${ok}，失败 ${fail}`
+        ? `✓ 批量更新${batchField === "price" ? "价格" : "库存"}（${ok}/${ids.length}）`
+        : `部分失败：成功 ${ok}，失败 ${fail}`
     );
     setBatchField(null);
     setBatchValue("");
     setSelectedIds(new Set());
     onChange();
   }
-
   async function batchDelete() {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
@@ -209,17 +271,26 @@ export function VariantsTable({
     onMessage(
       fail === 0
         ? `✓ 已删除 ${ok} 个变体`
-        : `批量删除部分失败：成功 ${ok}，失败 ${fail}`
+        : `部分失败：成功 ${ok}，失败 ${fail}`
     );
     setSelectedIds(new Set());
     onChange();
   }
 
+  function variantDisplayName(v: ProductVariant): string {
+    const parts = [v.option1, v.option2, v.option3].filter(
+      (x) => x && x.trim()
+    ) as string[];
+    return parts.length > 0 ? parts.join(" / ") : "默认";
+  }
+
   return (
     <section className="space-y-3 rounded-lg border bg-background p-5">
+      {/* 标题栏 */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">变体 ({variants.length})</h2>
         <button
+          type="button"
           onClick={addNew}
           className="rounded border px-3 py-1 text-xs hover:bg-accent"
         >
@@ -227,24 +298,28 @@ export function VariantsTable({
         </button>
       </div>
 
-      {/* Shopify 风格批量操作条：选中 ≥1 时显示，固定在表上方 */}
+      {/* 选项块 */}
+      <OptionsBlock blocks={optionBlocks} />
+
+      {/* 批量操作条 */}
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
           <span className="font-medium">已选 {selectedIds.size} 项</span>
           <span className="text-muted-foreground">·</span>
-
-          <BatchButton
+          <BatchBtn
             label="价格"
             active={batchField === "price"}
             onClick={() =>
               setBatchField(batchField === "price" ? null : "price")
             }
           />
-          <BatchButton
+          <BatchBtn
             label="库存"
             active={batchField === "inventoryQty"}
             onClick={() =>
-              setBatchField(batchField === "inventoryQty" ? null : "inventoryQty")
+              setBatchField(
+                batchField === "inventoryQty" ? null : "inventoryQty"
+              )
             }
           />
           <button
@@ -271,7 +346,8 @@ export function VariantsTable({
                   className="w-24 bg-transparent text-sm focus:outline-none"
                   placeholder={batchField === "price" ? "29.99" : "1000"}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !batchApplying && batchValue) applyBatch();
+                    if (e.key === "Enter" && !batchApplying && batchValue)
+                      applyBatch();
                   }}
                 />
                 <button
@@ -295,11 +371,12 @@ export function VariantsTable({
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      {/* 变体表 */}
+      <div className="overflow-hidden rounded-lg border">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+          <thead className="bg-muted/40 text-xs text-muted-foreground">
             <tr>
-              <th className="w-10 px-2 py-2 text-left">
+              <th className="w-10 px-3 py-2.5 text-left">
                 <input
                   type="checkbox"
                   aria-label="全选"
@@ -310,204 +387,230 @@ export function VariantsTable({
                   onChange={toggleAll}
                 />
               </th>
-              <th className="px-2 py-2 text-left">图</th>
-              {optionCols.length === 0 ? (
-                <th className="px-2 py-2 text-left">选项</th>
-              ) : (
-                optionCols.map((o) => (
-                  <th key={o.id} className="px-2 py-2 text-left">
-                    {o.name}
-                  </th>
-                ))
-              )}
-              <th className="px-2 py-2 text-right">价格 (USD)</th>
-              <th className="px-2 py-2 text-left">SKU</th>
-              <th className="px-2 py-2 text-right">库存</th>
-              <th className="px-2 py-2 text-right">操作</th>
+              <th className="px-3 py-2.5 text-left font-medium">变体</th>
+              <th className="w-44 px-3 py-2.5 text-left font-medium">
+                价格 (USD)
+              </th>
+              <th className="w-32 px-3 py-2.5 text-left font-medium">库存</th>
+              <th className="w-12 px-3 py-2.5"></th>
             </tr>
           </thead>
           <tbody>
             {variants.length === 0 && (
               <tr>
                 <td
-                  colSpan={Math.max(optionCols.length, 1) + 6}
-                  className="py-6 text-center text-xs text-muted-foreground"
+                  colSpan={5}
+                  className="py-8 text-center text-xs text-muted-foreground"
                 >
-                  暂无变体
+                  暂无变体，点击右上"+ 新增变体"添加。
                 </td>
               </tr>
             )}
             {variants.map((v) => {
-              const isEdit = editing === v.id;
               const checked = selectedIds.has(v.id);
               const thumb = v.variantImage || fallbackImg;
+              const d = drafts[v.id] ?? { price: "", inventoryQty: "" };
               return (
                 <tr
                   key={v.id}
                   className={
-                    "border-t " +
-                    (isEdit
-                      ? "bg-primary/5"
-                      : checked
-                        ? "bg-primary/[0.03]"
-                        : "")
+                    "border-t " + (checked ? "bg-primary/[0.04]" : "")
                   }
                 >
-                  <td className="px-2 py-2">
+                  <td className="px-3 py-2.5">
                     <input
                       type="checkbox"
-                      aria-label={`选择变体 ${v.sku || v.id}`}
+                      aria-label={`选择 ${v.sku || v.id}`}
                       checked={checked}
                       onChange={() => toggleOne(v.id)}
                     />
                   </td>
-                  <td className="px-2 py-2">
-                    {thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={thumb}
-                        alt=""
-                        className="h-10 w-10 rounded border object-cover"
-                      />
-                    ) : (
-                      <div className="grid h-10 w-10 place-items-center rounded border bg-muted text-[10px] text-muted-foreground">
-                        无
-                      </div>
-                    )}
-                  </td>
-
-                  {optionCols.length === 0 ? (
-                    <td className="px-2 py-2 text-xs text-muted-foreground">
-                      —
-                    </td>
-                  ) : (
-                    optionCols.map((o) =>
-                      isEdit ? (
-                        <td key={o.id} className="px-2 py-2">
-                          <input
-                            value={variantOptionValue(
-                              draft as ProductVariant,
-                              o.position
-                            )}
-                            onChange={(e) =>
-                              setDraftOptionValue(o.position, e.target.value)
-                            }
-                            className={inpSm + " w-28"}
-                            placeholder={o.name}
-                          />
-                        </td>
-                      ) : (
-                        <td key={o.id} className="px-2 py-2">
-                          {variantOptionValue(v, o.position) || "-"}
-                        </td>
-                      )
-                    )
-                  )}
-
-                  <td className="px-2 py-2 text-right">
-                    {isEdit ? (
-                      <div className="inline-flex items-center gap-1">
-                        <span className="text-xs text-muted-foreground">$</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={String(draft.price ?? 0)}
-                          onChange={(e) =>
-                            setDraft({
-                              ...draft,
-                              price: e.target.value as unknown as number,
-                            })
-                          }
-                          className={inpSm + " w-24 text-right"}
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-3">
+                      {thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={thumb}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded border object-cover"
                         />
+                      ) : (
+                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded border bg-muted text-[10px] text-muted-foreground">
+                          无
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">
+                          {variantDisplayName(v)}
+                        </div>
+                        <div className="truncate font-mono text-[11px] text-muted-foreground">
+                          {v.sku || `#${v.id}`}
+                        </div>
                       </div>
-                    ) : v.price != null ? (
-                      `$${Number(v.price).toFixed(2)}`
-                    ) : (
-                      "-"
-                    )}
+                    </div>
                   </td>
-                  <td className="px-2 py-2 font-mono text-xs">
-                    {v.sku || "-"}
-                    {isEdit && (
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">
-                        SKU 用「改 SKU」专用按钮
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    {isEdit ? (
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-1 rounded-md border bg-background px-2 py-1">
+                      <span className="text-xs text-muted-foreground">$</span>
                       <input
                         type="number"
-                        value={draft.inventoryQty ?? 0}
+                        step="0.01"
+                        value={d.price}
                         onChange={(e) =>
-                          setDraft({
-                            ...draft,
-                            inventoryQty: Number(e.target.value),
-                          })
+                          setRowField(v.id, "price", e.target.value)
                         }
-                        className={inpSm + " w-20 text-right"}
+                        onBlur={() => commitRow(v, "price")}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter")
+                            (e.target as HTMLInputElement).blur();
+                        }}
+                        className="w-full bg-transparent text-sm focus:outline-none"
                       />
-                    ) : (
-                      v.inventoryQty ?? 0
-                    )}
+                    </div>
                   </td>
-                  <td className="whitespace-nowrap px-2 py-2 text-right">
-                    {isEdit ? (
-                      <>
-                        <button
-                          onClick={save}
-                          className="mr-1 rounded border px-2 py-1 text-xs hover:bg-accent"
+                  <td className="px-3 py-2.5">
+                    <input
+                      type="number"
+                      value={d.inventoryQty}
+                      onChange={(e) =>
+                        setRowField(v.id, "inventoryQty", e.target.value)
+                      }
+                      onBlur={() => commitRow(v, "inventoryQty")}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter")
+                          (e.target as HTMLInputElement).blur();
+                      }}
+                      className="w-full rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    {/* 行操作 ⋮ 菜单 */}
+                    <div className="relative inline-block">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOpenMenuId(openMenuId === v.id ? null : v.id)
+                        }
+                        className="rounded p-1 text-muted-foreground hover:bg-accent"
+                        aria-label="行操作"
+                      >
+                        ⋮
+                      </button>
+                      {openMenuId === v.id && (
+                        <div
+                          ref={menuRef}
+                          className="absolute right-0 top-7 z-10 w-32 rounded-md border bg-background py-1 text-sm shadow-lg"
                         >
-                          保存
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEditing(null);
-                            setDraft({});
-                          }}
-                          className="rounded border px-2 py-1 text-xs hover:bg-accent"
-                        >
-                          取消
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => {
-                            setEditing(v.id);
-                            setDraft(v);
-                          }}
-                          className="mr-1 rounded border px-2 py-1 text-xs hover:bg-accent"
-                        >
-                          编辑
-                        </button>
-                        <button
-                          onClick={() => changeSku(v)}
-                          className="mr-1 rounded border px-2 py-1 text-xs hover:bg-accent"
-                        >
-                          改 SKU
-                        </button>
-                        <button
-                          onClick={() => del(v)}
-                          className="rounded border border-destructive px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
-                        >
-                          删除
-                        </button>
-                      </>
-                    )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenMenuId(null);
+                              changeSku(v);
+                            }}
+                            className="block w-full px-3 py-1.5 text-left hover:bg-accent"
+                          >
+                            改 SKU
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenMenuId(null);
+                              delOne(v);
+                            }}
+                            className="block w-full px-3 py-1.5 text-left text-destructive hover:bg-destructive/10"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+
+        {variants.length > 0 && (
+          <div className="border-t bg-muted/20 px-3 py-2 text-center text-xs text-muted-foreground">
+            总库存：<span className="tabular-nums">{totalInventory}</span>
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function BatchButton({
+/** 选项块：每个 option_name 一行，下方 chips。"+ 添加选项"占位（后端 CRUD 待补）。 */
+function OptionsBlock({
+  blocks,
+}: {
+  blocks: { position: number; name: string; values: string[] }[];
+}) {
+  if (blocks.length === 0) {
+    // 没选项：展示空态卡片 + 添加按钮（占位）
+    return (
+      <div className="rounded-lg border bg-muted/20 p-4">
+        <button
+          type="button"
+          onClick={() =>
+            alert("暂未支持 UI 编辑选项；请通过 CSV 导入或在变体行直接填 option1/2/3 字段。后端 CRUD 待 P3 完整化。")
+          }
+          className="text-sm text-primary hover:underline"
+        >
+          + 添加选项（如：颜色、尺寸）
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+      {blocks.map((b) => (
+        <div
+          key={b.position}
+          className="flex items-start gap-3 rounded-md border bg-background px-3 py-2"
+        >
+          {/* drag dot 占位（后续接 dnd） */}
+          <span className="mt-1 select-none text-xs text-muted-foreground">
+            ⋮⋮
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-muted-foreground">
+              {b.name}
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {b.values.length === 0 ? (
+                <span className="text-xs italic text-muted-foreground">
+                  （无值）
+                </span>
+              ) : (
+                b.values.map((val) => (
+                  <span
+                    key={val}
+                    className="rounded-md border bg-muted/50 px-2 py-0.5 text-xs"
+                  >
+                    {val}
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() =>
+          alert("暂未支持 UI 编辑选项；请通过 CSV 导入或在变体行直接填 option1/2/3 字段。后端 CRUD 待 P3 完整化。")
+        }
+        className="ml-2 text-sm text-primary hover:underline"
+      >
+        + 添加选项
+      </button>
+    </div>
+  );
+}
+
+function BatchBtn({
   label,
   active,
   onClick,
