@@ -40,6 +40,8 @@ function getNavGroups(t: (k: MessageKey) => string): NavGroup[] {
         { href: "/assets", label: t("nav.assets-snapshot"), anyPerm: ["THEME:PULL"] },
         { href: "/snapshots", label: t("nav.snapshots"), anyPerm: ["PRODUCT:READ"] },
         { href: "/templates", label: t("nav.templates") },
+        // AS6: 模板版本独立 CRUD UI（沿用 PLATFORM:TEMPLATE_MANAGE 权限）
+        { href: "/template-versions", label: t("nav.templateVersions") },
       ],
     },
     {
