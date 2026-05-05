@@ -153,24 +153,28 @@ export function RichTextEditor({ value, onChange, placeholder, onUploadImage }: 
         )}
       </div>
 
-      {/* 内容区 */}
+      {/* 内容区：三种模式统一固定最大高 + 内部纵向滚动。
+       *  之前用 min-h-[240px] / textarea rows={12}，长 HTML 内容会撑爆产品详情页布局，
+       *  富文本和媒体区会被挤到下方很远 —— 用户改个标题要滚很多。
+       *  现在容器固定 480px 高，超长内容只在框内滚，外层布局稳定。 */}
       {mode === "edit" && (
-        <EditorContent editor={editor} />
+        <div className="max-h-[480px] overflow-y-auto">
+          <EditorContent editor={editor} />
+        </div>
       )}
       {mode === "html" && (
         <textarea
           value={htmlSource}
           onChange={(e) => setHtmlSource(e.target.value)}
           onBlur={applyHtmlSource}
-          rows={12}
           spellCheck={false}
-          className="w-full px-3 py-2 font-mono text-xs focus:outline-none"
+          className="block h-[480px] w-full resize-none px-3 py-2 font-mono text-xs focus:outline-none"
           placeholder={placeholder}
         />
       )}
       {mode === "preview" && (
         <div
-          className="prose prose-sm max-w-none px-3 py-2"
+          className="prose prose-sm max-h-[480px] max-w-none overflow-y-auto px-3 py-2"
           dangerouslySetInnerHTML={{
             __html: htmlSource
               ? sanitizeHtml(htmlSource)
