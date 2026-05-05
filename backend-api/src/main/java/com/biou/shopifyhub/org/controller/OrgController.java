@@ -8,6 +8,7 @@ import com.biou.shopifyhub.org.entity.SysOrg;
 import com.biou.shopifyhub.org.service.OrgService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -43,6 +44,7 @@ public class OrgController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('PERM_ORG:MANAGE')")
     public Result<Map<String, Long>> create(@RequestBody SysOrg input) {
         Long id = service.create(input);
         // 创建成功后：若该组织（COMPANY）已配置钉钉，异步触发一次同步
@@ -53,12 +55,14 @@ public class OrgController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_ORG:MANAGE')")
     public Result<Void> update(@PathVariable Long id, @RequestBody SysOrg patch) {
         service.update(id, patch);
         return Result.ok();
     }
 
     /** 删除组织节点是危险操作，需走二次确认 */
+    @PreAuthorize("hasAuthority('PERM_ORG:MANAGE')")
     @RequireSensitiveOp("ORG_DELETE")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
@@ -68,14 +72,17 @@ public class OrgController {
 
     // ============================================================
     // F1 / F2 / F3：钉钉配置 + 同步
+    // 钉钉配置含企业 corpId / appKey / appSecret —— 极敏感，仅 PLATFORM:DINGTALK_CONFIG。
     // ============================================================
 
     @GetMapping("/{id}/dingtalk-config")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:DINGTALK_CONFIG')")
     public Result<Map<String, Object>> getDingtalkConfig(@PathVariable Long id) {
         return Result.ok(configService.viewSafe(id));
     }
 
     @PutMapping("/{id}/dingtalk-config")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:DINGTALK_CONFIG')")
     public Result<Void> saveDingtalkConfig(@PathVariable Long id,
                                            @RequestBody DingTalkConfigService.SaveConfigCmd cmd) {
         configService.save(id, cmd);
@@ -84,6 +91,7 @@ public class OrgController {
 
     /** 立即同步（同步调用，前端 loading 中）。 */
     @PostMapping("/{id}/sync")
+    @PreAuthorize("hasAuthority('PERM_ORG:MANAGE')")
     public Result<Map<String, Object>> sync(@PathVariable Long id) {
         DingTalkSyncService.SyncResult r = syncService.syncAll(id, "MANUAL");
         Map<String, Object> view = new HashMap<>();

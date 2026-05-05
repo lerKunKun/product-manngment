@@ -7,6 +7,7 @@ import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.entity.SysDataScope;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.core.mapper.SysDataScopeMapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,8 +37,10 @@ public class CrossCompanyAuthController {
         this.scopeMapper = scopeMapper;
     }
 
-    /** 列出跨公司授权（cross_company=1），可按 user_id / granter_company_id / status 过滤。 */
+    /** 列出跨公司授权（cross_company=1），可按 user_id / granter_company_id / status 过滤。
+     *  COMPANY_ADMIN 及以上可看（DATASCOPE:GRANT 或 AUDIT:READ 任一）。 */
     @GetMapping
+    @PreAuthorize("hasAuthority('PERM_DATASCOPE:GRANT') or hasAuthority('PERM_AUDIT:READ')")
     public Result<List<SysDataScope>> list(@RequestParam(required = false) Long userId,
                                            @RequestParam(required = false) Long granterCompanyId,
                                            @RequestParam(required = false) String status) {
@@ -50,8 +53,10 @@ public class CrossCompanyAuthController {
         return Result.ok(scopeMapper.selectList(q));
     }
 
-    /** 授予跨公司权限：必须带 expires_at，区间 [now+5min, now+180d]。敏感操作。 */
+    /** 授予跨公司权限：必须带 expires_at，区间 [now+5min, now+180d]。敏感操作。
+     *  仅 DATASCOPE:GRANT 角色（PLATFORM_SUPER / COMPANY_ADMIN）可调用。 */
     @PostMapping
+    @PreAuthorize("hasAuthority('PERM_DATASCOPE:GRANT')")
     @RequireSensitiveOp("CROSS_AUTH_GRANT")
     public Result<Long> grant(@RequestBody GrantRequest req) {
         if (req.expiresAt() == null) {
@@ -87,6 +92,7 @@ public class CrossCompanyAuthController {
 
     /** 立即撤销一条授权。敏感操作。 */
     @PostMapping("/{id}/revoke")
+    @PreAuthorize("hasAuthority('PERM_DATASCOPE:GRANT')")
     @RequireSensitiveOp("CROSS_AUTH_REVOKE")
     public Result<Void> revoke(@PathVariable Long id) {
         SysDataScope ds = scopeMapper.selectById(id);

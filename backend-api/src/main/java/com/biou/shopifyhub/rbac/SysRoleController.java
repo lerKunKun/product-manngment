@@ -10,6 +10,7 @@ import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.core.mapper.SysRoleMapper;
 import com.biou.shopifyhub.core.mapper.SysUserRoleMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -86,6 +87,7 @@ public class SysRoleController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('PLATFORM_SUPER')")
     public Result<Long> create(@RequestBody CreateBody body) {
         if (body == null || body.code() == null || body.code().isBlank() || body.name() == null || body.name().isBlank()) {
             throw new BusinessException(ResultCode.VALIDATION_FAILED, "code/name 必填");
@@ -108,6 +110,7 @@ public class SysRoleController {
     }
 
     @PutMapping("/{id}/permissions")
+    @PreAuthorize("hasRole('PLATFORM_SUPER')")
     @RequireSensitiveOp("ROLE_PERMISSION_CHANGE")
     @Transactional
     public Result<Void> resetPermissions(@PathVariable Long id, @RequestBody PermissionsBody body) {
@@ -152,6 +155,7 @@ public class SysRoleController {
      * 同步清理 sys_role_permission 记录。
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('PLATFORM_SUPER')")
     @RequireSensitiveOp("ROLE_DELETE")
     @Transactional
     public Result<Void> delete(@PathVariable Long id) {
@@ -173,6 +177,7 @@ public class SysRoleController {
 
     /** 编辑角色基本信息（name / description）—— code 与 scope 不允许改（影响数据范围语义）。 */
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('PLATFORM_SUPER')")
     public Result<Void> update(@PathVariable Long id, @RequestBody UpdateBody body) {
         SysRole role = roleMapper.selectById(id);
         if (role == null) return Result.error(ResultCode.NOT_FOUND);

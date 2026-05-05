@@ -11,6 +11,7 @@ import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.core.entity.SysRole;
 import com.biou.shopifyhub.org.entity.SysOrg;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -45,9 +46,12 @@ public class AdminUserController {
                                                 @RequestParam(required = false) String status,
                                                 @RequestParam(required = false) String userType,
                                                 @RequestParam(required = false) Long deptId,
+                                                /** 子孙过滤：前端选中节点 → 传该节点 + 所有子孙 id；命中任一即算。
+                                                 *  与 deptId 二选一传，同时传时 deptIds 优先。 */
+                                                @RequestParam(required = false) List<Long> deptIds,
                                                 @RequestParam(defaultValue = "1") int page,
                                                 @RequestParam(defaultValue = "20") int size) {
-        return Result.ok(service.list(keyword, status, userType, deptId, page, size));
+        return Result.ok(service.list(keyword, status, userType, deptId, deptIds, page, size));
     }
 
     @GetMapping("/{id}")
@@ -121,10 +125,15 @@ public class AdminUserController {
     }
 
     /**
-     * 以指定员工身份登录。**高敏感**：要求 X-Sensitive-Token（action=IMPERSONATE_USER）；
-     * 颁发 access token + 写 session（不发 refresh cookie）；写一条 IMPERSONATE 审计行。
+     * 以指定员工身份登录。**最高敏感**：仅 PLATFORM_SUPER 可调用（即使 COMPANY_ADMIN 也不行，
+     * 防止本公司管理员冒名某员工绕过审计）。三道闸门：
+     *  1. URL 粗拦（SecurityConfig: /admin/users/** 非 GET 需 USER:MANAGE）
+     *  2. 方法级 @PreAuthorize hasRole('PLATFORM_SUPER')（这里）
+     *  3. @RequireSensitiveOp 二次确认（钉钉验证码）
+     * 写一条 IMPERSONATE 审计行。
      */
     @PostMapping("/{id}/impersonate")
+    @PreAuthorize("hasRole('PLATFORM_SUPER')")
     @RequireSensitiveOp("IMPERSONATE_USER")
     public Result<ImpersonateResp> impersonate(@PathVariable Long id, HttpServletRequest req) {
         Long uid = CurrentUser.userIdOrThrow();

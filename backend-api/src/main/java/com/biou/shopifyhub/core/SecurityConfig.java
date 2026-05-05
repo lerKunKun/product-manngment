@@ -5,13 +5,20 @@ import com.biou.shopifyhub.core.security.RestAuthEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 
+/**
+ * @EnableMethodSecurity 让 controller 上的 @PreAuthorize 生效。Phase 3 各模块挂的
+ * @PreAuthorize("hasRole('X')") / hasAuthority("PERM_Y") 是 URL 粗拦之上的第二道闸门，
+ * 适合做 endpoint 级（同一 RequestMapping 下不同 method 不同 perm）的精细 gate。
+ */
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfig {
 
     /**
