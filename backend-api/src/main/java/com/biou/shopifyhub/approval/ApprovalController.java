@@ -8,6 +8,7 @@ import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,6 +37,7 @@ public class ApprovalController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('PERM_APPROVAL:SUBMIT', 'PERM_APPROVAL:DECIDE')")
     public Result<List<ApprovalFlow>> list(@RequestParam(required = false) String type,
                                            @RequestParam(required = false) String status,
                                            @RequestParam(required = false) Long applicantId,
@@ -44,12 +46,14 @@ public class ApprovalController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('PERM_APPROVAL:SUBMIT', 'PERM_APPROVAL:DECIDE')")
     public Result<ApprovalDetail> get(@PathVariable Long id) {
         ApprovalFlow f = engine.get(id);
         return Result.ok(new ApprovalDetail(f, engine.listLogs(id)));
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('PERM_APPROVAL:SUBMIT')")
     public Result<ApprovalFlow> submit(@RequestBody SubmitBody body) {
         Long me = CurrentUser.userIdOrNull();
         Long applicant = body.applicantId() != null ? body.applicantId() : me;
@@ -66,32 +70,38 @@ public class ApprovalController {
     }
 
     @PostMapping("/{id}/approve")
+    @PreAuthorize("hasAuthority('PERM_APPROVAL:DECIDE')")
     public Result<ApprovalFlow> approve(@PathVariable Long id, @RequestBody(required = false) DecisionBody body) {
         return Result.ok(engine.approve(id, CurrentUser.userIdOrThrow(), body == null ? null : body.comment()));
     }
 
     @PostMapping("/{id}/reject")
+    @PreAuthorize("hasAuthority('PERM_APPROVAL:DECIDE')")
     public Result<ApprovalFlow> reject(@PathVariable Long id, @RequestBody(required = false) DecisionBody body) {
         return Result.ok(engine.reject(id, CurrentUser.userIdOrThrow(), body == null ? null : body.comment()));
     }
 
     @PostMapping("/{id}/resubmit")
+    @PreAuthorize("hasAuthority('PERM_APPROVAL:SUBMIT')")
     public Result<ApprovalFlow> resubmit(@PathVariable Long id, @RequestBody(required = false) ResubmitBody body) {
         return Result.ok(engine.resubmit(id, CurrentUser.userIdOrThrow(), body == null ? null : body.payload()));
     }
 
     @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasAuthority('PERM_APPROVAL:SUBMIT')")
     public Result<ApprovalFlow> cancel(@PathVariable Long id) {
         return Result.ok(engine.cancel(id, CurrentUser.userIdOrThrow()));
     }
 
     @GetMapping("/pending/me")
+    @PreAuthorize("hasAnyAuthority('PERM_APPROVAL:SUBMIT', 'PERM_APPROVAL:DECIDE')")
     public Result<List<ApprovalFlow>> myPending() {
         return Result.ok(engine.pendingFor(CurrentUser.userIdOrThrow()));
     }
 
     /** T22: 批量通过。逐条调 engine.approve，单条失败不阻塞整体；返回 ok/fail 计数 + 失败 ids。 */
     @PostMapping("/batch/approve")
+    @PreAuthorize("hasAuthority('PERM_APPROVAL:DECIDE')")
     public Result<Map<String, Object>> batchApprove(@RequestBody BatchApproveBody body) {
         Long me = CurrentUser.userIdOrThrow();
         if (body == null || body.flowIds() == null || body.flowIds().isEmpty()) {

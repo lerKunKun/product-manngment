@@ -8,6 +8,7 @@ import com.biou.shopifyhub.invitation.dto.InvitationListItem;
 import com.biou.shopifyhub.invitation.dto.InvitationPreviewResponse;
 import com.biou.shopifyhub.invitation.service.InvitationService;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,11 +26,13 @@ public class InvitationController {
 
     /** 列表（PENDING / ACCEPTED / REVOKED / LINK_EXPIRED）。 */
     @GetMapping
+    @PreAuthorize("hasAuthority('PERM_TEMP_USER:LIST')")
     public Result<List<InvitationListItem>> list(@RequestParam(required = false) String status) {
         return Result.ok(service.list(CurrentUser.userIdOrNull(), status));
     }
 
     @PostMapping("/create")
+    @PreAuthorize("hasAuthority('PERM_TEMP_USER:INVITE')")
     public Result<Map<String, Long>> create(@Valid @RequestBody InvitationCreateRequest req) {
         Long uid = CurrentUser.userIdOrNull();
         if (uid == null) uid = 1L; // dev fallback for local调试 → 走默认 admin
@@ -50,6 +53,7 @@ public class InvitationController {
     }
 
     @PostMapping("/{id}/revoke")
+    @PreAuthorize("hasAuthority('PERM_TEMP_USER:REVOKE')")
     public Result<Void> revoke(@PathVariable Long id, @RequestParam(required = false) String reason) {
         Long uid = CurrentUser.userIdOrNull();
         if (uid == null) uid = 1L;
@@ -58,6 +62,7 @@ public class InvitationController {
     }
 
     @PostMapping("/users/{userId}/revoke")
+    @PreAuthorize("hasAuthority('PERM_TEMP_USER:REVOKE')")
     public Result<Void> revokeUser(@PathVariable Long userId, @RequestParam(required = false) String reason) {
         Long uid = CurrentUser.userIdOrNull();
         if (uid == null) uid = 1L;

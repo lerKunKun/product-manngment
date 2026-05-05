@@ -5,6 +5,7 @@ import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.core.ResultCode;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,6 +31,7 @@ public class RecycleBinController {
     }
 
     @GetMapping("/{table}")
+    @PreAuthorize("hasAuthority('PERM_RECYCLE_BIN:VIEW')")
     public Result<List<Map<String, Object>>> list(@PathVariable String table) {
         ensureAllowed(table);
         // 注意：rsults 包含 raw 列（含敏感字段如 password_hash）—— 上线前应过滤
@@ -51,6 +53,7 @@ public class RecycleBinController {
     }
 
     @RequireSensitiveOp("RECYCLE_RESTORE")
+    @PreAuthorize("hasAuthority('PERM_RECYCLE_BIN:RESTORE')")
     @PostMapping("/{table}/{id}/restore")
     public Result<Void> restore(@PathVariable String table, @PathVariable Long id) {
         ensureAllowed(table);
