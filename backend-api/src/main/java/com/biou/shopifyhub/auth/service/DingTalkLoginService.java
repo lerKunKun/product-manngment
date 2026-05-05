@@ -14,6 +14,7 @@ import com.biou.shopifyhub.core.mapper.SysUserMapper;
 import com.biou.shopifyhub.core.mapper.SysUserRoleMapper;
 import com.biou.shopifyhub.core.security.JwtUtil;
 import com.biou.shopifyhub.core.security.SessionService;
+import com.biou.shopifyhub.rbac.UserRolePermissionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,19 +43,22 @@ public class DingTalkLoginService {
     private final SysRoleMapper roleMapper;
     private final JwtUtil jwtUtil;
     private final SessionService sessionService;
+    private final UserRolePermissionService rbac;
 
     public DingTalkLoginService(
         SysUserMapper userMapper,
         SysUserRoleMapper userRoleMapper,
         SysRoleMapper roleMapper,
         JwtUtil jwtUtil,
-        SessionService sessionService
+        SessionService sessionService,
+        UserRolePermissionService rbac
     ) {
         this.userMapper = userMapper;
         this.userRoleMapper = userRoleMapper;
         this.roleMapper = roleMapper;
         this.jwtUtil = jwtUtil;
         this.sessionService = sessionService;
+        this.rbac = rbac;
     }
 
     @Transactional
@@ -103,7 +107,9 @@ public class DingTalkLoginService {
             user.getEmployeeNo(),
             user.getUserType(),
             fresh || Boolean.TRUE.equals(user.getPasswordMustChange()),
-            access
+            access,
+            rbac.loadRoles(user.getId()),
+            rbac.loadPermissions(user.getId())
         );
         return new LoginResult(resp, refresh);
     }

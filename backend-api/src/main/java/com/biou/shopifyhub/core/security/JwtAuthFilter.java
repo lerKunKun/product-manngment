@@ -1,6 +1,7 @@
 package com.biou.shopifyhub.core.security;
 
 import com.biou.shopifyhub.core.tenant.TenantContext;
+import com.biou.shopifyhub.rbac.UserRolePermissionService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
@@ -11,13 +12,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.List;
+import java.util.Collection;
 
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
@@ -28,11 +29,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final StringRedisTemplate redis;
     private final SessionService sessionService;
+    private final UserRolePermissionService rbac;
 
-    public JwtAuthFilter(JwtUtil jwtUtil, StringRedisTemplate redis, SessionService sessionService) {
+    public JwtAuthFilter(JwtUtil jwtUtil, StringRedisTemplate redis, SessionService sessionService,
+                         UserRolePermissionService rbac) {
         this.jwtUtil = jwtUtil;
         this.redis = redis;
         this.sessionService = sessionService;
+        this.rbac = rbac;
     }
 
     @Override
@@ -59,8 +63,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
                 TenantContext.set(tenantId, null, userId, username, sid);
 
+                // RBAC：从 sys_user_role / sys_role_permission 解析当前实际授权（带 Redis cache）。
+                // 之前硬编码 ROLE_USER 让所有登录用户在 Spring Security 看来等价 → 任意 admin
+                // endpoint 都能进。改为按用户实际角色 + 权限码构 authorities，配合 SecurityConfig
+                // 的 hasRole / hasAuthority 做 endpoint 级拦截。
+                Collection<GrantedAuthority> authorities = rbac.loadAuthorities(userId);
                 UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                    username, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))
+                    username, null, authorities
                 );
                 SecurityContextHolder.getContext().setAuthentication(auth);
             } catch (JwtException | IllegalArgumentException | IllegalStateException e) {

@@ -65,6 +65,7 @@ public class AdminUserService {
     private final SysAuditLogMapper auditMapper;
     private final JwtUtil jwtUtil;
     private final SessionService sessionService;
+    private final com.biou.shopifyhub.rbac.UserRolePermissionService rbac;
 
     public AdminUserService(SysUserMapper userMapper,
                             SysUserRoleMapper userRoleMapper,
@@ -72,7 +73,8 @@ public class AdminUserService {
                             SysOrgMapper orgMapper,
                             SysAuditLogMapper auditMapper,
                             JwtUtil jwtUtil,
-                            SessionService sessionService) {
+                            SessionService sessionService,
+                            com.biou.shopifyhub.rbac.UserRolePermissionService rbac) {
         this.userMapper = userMapper;
         this.userRoleMapper = userRoleMapper;
         this.roleMapper = roleMapper;
@@ -80,12 +82,13 @@ public class AdminUserService {
         this.auditMapper = auditMapper;
         this.jwtUtil = jwtUtil;
         this.sessionService = sessionService;
+        this.rbac = rbac;
     }
 
     // ===== 列表 / 详情 =====
 
     public Page<AdminUserListItem> list(String keyword, String status, String userType, Long deptId,
-                                        int page, int size) {
+                                        List<Long> deptIds, int page, int size) {
         int safeSize = Math.min(Math.max(1, size), 200);
         int safePage = Math.max(1, page);
 
@@ -100,10 +103,17 @@ public class AdminUserService {
         }
         if (status != null && !status.isBlank()) q.eq("status", status);
         if (userType != null && !userType.isBlank()) q.eq("user_type", userType);
-        // deptId 过滤需要 JOIN sys_user_role：先查 user_role 拿 user_id，再 in
-        if (deptId != null) {
+        // dept 过滤：deptIds 优先（子孙过滤），fallback 到 deptId 单值。
+        // 都需要 JOIN sys_user_role：先查 user_role 拿 user_id，再 in。
+        List<Long> deptFilter = null;
+        if (deptIds != null && !deptIds.isEmpty()) {
+            deptFilter = deptIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        } else if (deptId != null) {
+            deptFilter = List.of(deptId);
+        }
+        if (deptFilter != null && !deptFilter.isEmpty()) {
             List<SysUserRole> uros = userRoleMapper.selectList(
-                new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getOrgId, deptId)
+                new LambdaQueryWrapper<SysUserRole>().in(SysUserRole::getOrgId, deptFilter)
             );
             List<Long> uids = uros.stream().map(SysUserRole::getUserId).distinct().toList();
             if (uids.isEmpty()) {
@@ -191,7 +201,8 @@ public class AdminUserService {
                 rnames,
                 u.getLastLoginAt(),
                 u.getLastLoginIp(),
-                u.getCreatedAt()
+                u.getCreatedAt(),
+                u.getPasswordMustChange()
             ));
         }
         return out;
@@ -322,16 +333,19 @@ public class AdminUserService {
         if (u == null) throw new BusinessException(ResultCode.NOT_FOUND);
         // 删旧
         userRoleMapper.delete(new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getUserId, userId));
-        if (roleIds == null || roleIds.isEmpty()) return;
-        // 插新（去重）
-        Set<Long> dedup = new HashSet<>(roleIds);
-        for (Long rid : dedup) {
-            SysUserRole ur = new SysUserRole();
-            ur.setUserId(userId);
-            ur.setRoleId(rid);
-            ur.setCreatedAt(LocalDateTime.now());
-            userRoleMapper.insert(ur);
+        if (roleIds != null && !roleIds.isEmpty()) {
+            // 插新（去重）
+            Set<Long> dedup = new HashSet<>(roleIds);
+            for (Long rid : dedup) {
+                SysUserRole ur = new SysUserRole();
+                ur.setUserId(userId);
+                ur.setRoleId(rid);
+                ur.setCreatedAt(LocalDateTime.now());
+                userRoleMapper.insert(ur);
+            }
         }
+        // 角色变了 → 该用户的下次请求应立即看到新权限，不能等 5 分钟 cache TTL
+        rbac.invalidate(userId);
     }
 
     // ===== 批量操作 =====

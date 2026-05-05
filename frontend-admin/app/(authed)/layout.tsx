@@ -66,6 +66,8 @@ export default function AuthedLayout({
             employeeNo: d.employeeNo,
             userType: d.userType,
             passwordMustChange: d.passwordMustChange,
+            roles: d.roles ?? [],
+            permissions: d.permissions ?? [],
           },
           d.accessToken
         );
@@ -76,13 +78,30 @@ export default function AuthedLayout({
     })();
   }, [hydrated, router]);
 
-  // 心跳：每 20s ping /auth/me；被踢/失效会触发全局 401 处理
+  // 心跳：每 20s ping /auth/me；被踢/失效会触发全局 401 处理。
+  // 顺便把后端最新 roles/permissions 同步进 zustand —— admin 改了角色后 ≤20s 生效。
   useEffect(() => {
     if (booting) return;
     const t = setInterval(() => {
-      authApi.me().catch(() => {
-        // me() 已 silent；401 会被 client.ts 的 onUnauthorized 处理
-      });
+      authApi
+        .me()
+        .then((m) => {
+          const cur = useAuthStore.getState().user;
+          if (!cur) return;
+          const sameRoles =
+            JSON.stringify(cur.roles ?? []) === JSON.stringify(m.roles ?? []);
+          const samePerms =
+            JSON.stringify(cur.permissions ?? []) === JSON.stringify(m.permissions ?? []);
+          if (sameRoles && samePerms) return;
+          useAuthStore.getState().setUser({
+            ...cur,
+            roles: m.roles ?? [],
+            permissions: m.permissions ?? [],
+          });
+        })
+        .catch(() => {
+          // me() 已 silent；401 会被 client.ts 的 onUnauthorized 处理
+        });
     }, HEARTBEAT_MS);
     return () => clearInterval(t);
   }, [booting]);

@@ -10,6 +10,10 @@ export type AuthUser = {
   employeeNo?: string;
   userType?: "STAFF" | "TEMP";
   passwordMustChange?: boolean;
+  /** 当前用户角色码（PLATFORM_SUPER / COMPANY_ADMIN / EMPLOYEE 等），P1.5 加入 */
+  roles?: string[];
+  /** 当前用户实际权限码（PRODUCT:READ / STORE:OAUTH 等，已通过角色聚合） */
+  permissions?: string[];
 };
 
 /**
@@ -179,6 +183,8 @@ if (typeof window !== "undefined") {
           userType?: "STAFF" | "TEMP";
           passwordMustChange: boolean;
           accessToken: string;
+          roles?: string[];
+          permissions?: string[];
         };
         useAuthStore.getState().setSession(
           {
@@ -187,6 +193,8 @@ if (typeof window !== "undefined") {
             employeeNo: d.employeeNo,
             userType: d.userType,
             passwordMustChange: d.passwordMustChange,
+            roles: d.roles ?? [],
+            permissions: d.permissions ?? [],
           },
           d.accessToken
         );

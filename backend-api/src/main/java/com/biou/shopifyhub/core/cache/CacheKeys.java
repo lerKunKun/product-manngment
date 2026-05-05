@@ -21,8 +21,13 @@ public final class CacheKeys {
         return "cache:product:detail:" + productId;
     }
 
-    /** 用户解析后的权限集合（user → permissions），W3-PERF-01 留口子，当前 RBAC 无单点解析方法故未启用 */
+    /** 用户解析后的权限集合（user → permissions），P1.3 RBAC 落地后启用 */
     public static String userPermissions(Long userId) {
         return "cache:rbac:user:" + userId + ":permissions";
+    }
+
+    /** 用户角色码集合（user → role codes），P1.3 RBAC 落地后启用 */
+    public static String userRoles(Long userId) {
+        return "cache:rbac:user:" + userId + ":roles";
     }
 }

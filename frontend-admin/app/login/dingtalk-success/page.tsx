@@ -29,6 +29,8 @@ function Inner() {
             employeeNo: d.employeeNo,
             userType: d.userType,
             passwordMustChange: d.passwordMustChange,
+            roles: d.roles ?? [],
+            permissions: d.permissions ?? [],
           },
           d.accessToken
         );

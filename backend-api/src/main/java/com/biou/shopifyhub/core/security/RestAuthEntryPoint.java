@@ -34,22 +34,22 @@ public class RestAuthEntryPoint implements AuthenticationEntryPoint, AccessDenie
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
                          AuthenticationException authException) throws IOException {
-        write(response, HttpServletResponse.SC_UNAUTHORIZED);
+        // 未登录 / token 失效 → 401 + code 10001（前端 client.ts 据此触发 auto-refresh）
+        write(response, HttpServletResponse.SC_UNAUTHORIZED, ResultCode.UNAUTHORIZED);
     }
 
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        AccessDeniedException accessDeniedException) throws IOException {
-        // 已认证但无权限：保留 403 语义，但 body 仍是 JSON 让前端能解析
-        write(response, HttpServletResponse.SC_FORBIDDEN);
+        // 已认证但无权限 → 403 + code 10002。前端必须区分：
+        // 10001 → refresh + retry；10002 → 直接 toast 提示，不要 refresh-loop，不要踢去 /login
+        write(response, HttpServletResponse.SC_FORBIDDEN, ResultCode.FORBIDDEN);
     }
 
-    private void write(HttpServletResponse resp, int status) throws IOException {
+    private void write(HttpServletResponse resp, int status, ResultCode code) throws IOException {
         resp.setStatus(status);
         resp.setContentType(MediaType.APPLICATION_JSON_VALUE);
         resp.setCharacterEncoding("UTF-8");
-        resp.getWriter().write(mapper.writeValueAsString(
-            Result.error(ResultCode.UNAUTHORIZED, "")
-        ));
+        resp.getWriter().write(mapper.writeValueAsString(Result.error(code, "")));
     }
 }

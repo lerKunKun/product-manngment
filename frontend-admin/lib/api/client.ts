@@ -70,8 +70,9 @@ async function rawFetch<T>(
   });
 
   const body: ApiResult<T> = await resp.json().catch(() => ({
-    // 401/403 没拿到 JSON body（中间层 / 旧路径 / 静态错误页）也兜底成 10001 让 auto-refresh 能介入
-    code: resp.status === 401 || resp.status === 403 ? 10001 : -1,
+    // 401 没拿到 JSON body → 兜底 10001 让 auto-refresh 介入
+    // 403 → 兜底 10002（无权操作），不要走 refresh
+    code: resp.status === 401 ? 10001 : resp.status === 403 ? 10002 : -1,
     message: `HTTP ${resp.status}`,
   }));
   return { status: resp.status, body };
@@ -103,6 +104,10 @@ async function request<T>(
     }
     onUnauthorized();
   }
+
+  // 403 (FORBIDDEN, code 10002) → 不要 refresh、不要跳 /login。
+  // 这是 RBAC 拒绝（已登录但无权限），让 toast 提示用户即可（除非调用方 silent）。
+  // 注意：没有 throw 后置 fall-through —— 仍然会走下面 body.code !== 0 抛 ApiError。
 
   if (body.code !== 0) {
     if (!silent) toast.error(formatErrorToast(body.code, body.message));

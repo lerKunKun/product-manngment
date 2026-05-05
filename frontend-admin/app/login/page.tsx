@@ -31,6 +31,8 @@ export default function LoginPage() {
           employeeNo: r.employeeNo,
           userType: r.userType,
           passwordMustChange: r.passwordMustChange,
+          roles: r.roles ?? [],
+          permissions: r.permissions ?? [],
         },
         r.accessToken
       );

@@ -10,6 +10,7 @@ import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.core.security.CookieUtil;
 import com.biou.shopifyhub.core.tenant.TenantContext;
+import com.biou.shopifyhub.rbac.UserRolePermissionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -24,10 +25,12 @@ public class AuthController {
 
     private final AuthService service;
     private final CookieUtil cookieUtil;
+    private final UserRolePermissionService rbac;
 
-    public AuthController(AuthService service, CookieUtil cookieUtil) {
+    public AuthController(AuthService service, CookieUtil cookieUtil, UserRolePermissionService rbac) {
         this.service = service;
         this.cookieUtil = cookieUtil;
+        this.rbac = rbac;
     }
 
     @PostMapping("/login")
@@ -68,6 +71,9 @@ public class AuthController {
         m.put("userId", uid);
         m.put("username", CurrentUser.username());
         m.put("sid", TenantContext.sid());
+        // P1.5：把 RBAC 现状灌进 /me 响应，前端心跳 + boot 都能拿到最新角色 / 权限。
+        m.put("roles", rbac.loadRoles(uid));
+        m.put("permissions", rbac.loadPermissions(uid));
         return Result.ok(m);
     }
 

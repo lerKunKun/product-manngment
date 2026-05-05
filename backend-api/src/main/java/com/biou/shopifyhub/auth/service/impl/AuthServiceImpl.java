@@ -13,6 +13,7 @@ import com.biou.shopifyhub.core.metrics.MetricsRegistry;
 import com.biou.shopifyhub.core.security.JwtUtil;
 import com.biou.shopifyhub.core.security.SessionInfo;
 import com.biou.shopifyhub.core.security.SessionService;
+import com.biou.shopifyhub.rbac.UserRolePermissionService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -43,16 +44,19 @@ public class AuthServiceImpl implements AuthService {
     private final SessionService sessionService;
     private final MeterRegistry meterRegistry;
     private final MetricsRegistry metricsRegistry;
+    private final UserRolePermissionService rbac;
 
     public AuthServiceImpl(SysUserMapper userMapper, JwtUtil jwtUtil, StringRedisTemplate redis,
                            SessionService sessionService,
-                           MeterRegistry meterRegistry, MetricsRegistry metricsRegistry) {
+                           MeterRegistry meterRegistry, MetricsRegistry metricsRegistry,
+                           UserRolePermissionService rbac) {
         this.userMapper = userMapper;
         this.jwtUtil = jwtUtil;
         this.redis = redis;
         this.sessionService = sessionService;
         this.meterRegistry = meterRegistry;
         this.metricsRegistry = metricsRegistry;
+        this.rbac = rbac;
     }
 
     @Override
@@ -186,7 +190,9 @@ public class AuthServiceImpl implements AuthService {
             user.getEmployeeNo(),
             user.getUserType(),
             Boolean.TRUE.equals(user.getPasswordMustChange()),
-            access
+            access,
+            rbac.loadRoles(user.getId()),
+            rbac.loadPermissions(user.getId())
         );
         return new LoginResult(resp, refresh);
     }
