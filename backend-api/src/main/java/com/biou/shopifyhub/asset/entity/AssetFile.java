@@ -13,6 +13,11 @@ public class AssetFile {
     private Long snapshotId;
     private String relativePath;
     private String r2Key;
+    /**
+     * CAS blob 引用（{@code asset_blob.sha256}）。
+     * 新写入路径会与 {@link #sha256} 同值；老数据保留 NULL，等 follow-up 回填。
+     */
+    private String blobSha256;
     private Long sizeBytes;
     private String contentType;
     private String sha256;
@@ -26,6 +31,8 @@ public class AssetFile {
     public void setRelativePath(String relativePath) { this.relativePath = relativePath; }
     public String getR2Key() { return r2Key; }
     public void setR2Key(String r2Key) { this.r2Key = r2Key; }
+    public String getBlobSha256() { return blobSha256; }
+    public void setBlobSha256(String blobSha256) { this.blobSha256 = blobSha256; }
     public Long getSizeBytes() { return sizeBytes; }
     public void setSizeBytes(Long sizeBytes) { this.sizeBytes = sizeBytes; }
     public String getContentType() { return contentType; }

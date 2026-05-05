@@ -1,19 +1,24 @@
 """
-Product pull orchestration.
+Product pull orchestration (CAS-backed, Track AS2).
 
-Given a snapshot id, a Shopify shop and a ``product_id``, pulls the full
-product JSON via Admin REST and downloads every image binary referenced
-by ``images[].src`` from Shopify's public CDN. Each artifact is uploaded
-to R2 under a deterministic prefix and a manifest.json is written last.
+Pulls the full product JSON via Admin REST and downloads every image
+binary referenced by ``images[].src`` from Shopify's CDN. Bytes are
+pushed through CAS (:mod:`app.services.cas_storage`) so the same image
+shared across stores or repeat snapshots only takes one R2 slot, and a
+single ``manifest.json`` at the snapshot prefix maps relative_path ->
+sha256.
 
-This is the most complex of the W2-AST pulls because of the binary
-media download step. Failure of any single image surfaces immediately
-(fail-fast) so the snapshot row stays FAILED in DB; orphan keys in R2
-from a partial upload are tolerable and reaped by snapshot lifecycle.
+**Backward-compat note** — :class:`SnapshotGenerationService` (Java)
+reads ``{prefix}product.json`` directly to re-derive a snapshot CSV. We
+therefore *also* PUT ``product.json`` at that legacy key in the real
+path; the same bytes still go through CAS too. The duplicate write is
+small (a single JSON document per pull) and avoids a backend change.
+The dry-run path mirrors this behaviour so ``downloadBytes`` keeps
+working in dev / MinIO. Removing the legacy key is a follow-up that
+must land alongside an update to ``SnapshotGenerationService``.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
@@ -23,7 +28,10 @@ from urllib.parse import urlsplit
 
 from app.clients.shopify_admin import ShopifyAdminClient, download_url
 from app.services._dry_run import try_put_object as _try_put_object
+from app.services.cas_storage import put_or_link
+from app.services.manifest_writer import ManifestEntry, write_manifest
 from app.services.progress import ProgressEmitter
+from app.services.theme_pull import _safe_put_or_link, _safe_write_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +53,7 @@ def _extract_image_ext(url: str) -> str:
     Strips the query string, lowercases, then returns the trailing
     ``.{ext}`` component if present and whitelisted. ``jpeg`` collapses
     to ``jpg``. Anything not in the whitelist (or a URL with no
-    extension) returns ``"bin"`` so a content-type-driven fallback can
-    be used.
+    extension) returns ``"bin"``.
     """
     if not url:
         return "bin"
@@ -62,8 +69,19 @@ def _extract_image_ext(url: str) -> str:
     return "bin"
 
 
+def _content_type_for_ext(ext: str) -> str:
+    return {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+        "gif": "image/gif",
+        "avif": "image/avif",
+    }.get(ext, "application/octet-stream")
+
+
 class ProductPullService:
-    """Orchestrates shopify-cli + Admin REST + CDN media + R2 for a single product."""
+    """Orchestrates shopify-cli + Admin REST + CDN media + CAS R2 for one product."""
 
     def __init__(
         self,
@@ -127,7 +145,6 @@ class ProductPullService:
         product_id: int,
     ) -> dict:
         prefix = _r2_prefix(tenant_id, store_id, snapshot_id)
-        manifest_key = f"{prefix}manifest.json"
         started_at = _now_iso()
         clock_start = time.perf_counter()
 
@@ -135,35 +152,46 @@ class ProductPullService:
         admin = self.admin_factory(shop_domain, token)
         product = admin.get_product(product_id)
 
-        files: list[dict] = []
+        entries: list[ManifestEntry] = []
         total_bytes = 0
+        deduped_count = 0
 
-        # 1. product.json
+        # 1. product.json — push to CAS *and* legacy ``{prefix}product.json``
+        #    for SnapshotGenerationService.
         product_bytes = json.dumps(product, ensure_ascii=False, indent=2).encode("utf-8")
-        product_key = f"{prefix}product.json"
-        self.r2_client.put_object(
-            product_key, product_bytes, content_type="application/json"
+        product_cas = put_or_link(
+            self.r2_client, tenant_id, product_bytes, "application/json"
         )
-        files.append(
+        if product_cas["deduped"]:
+            deduped_count += 1
+        # Legacy key — backend reads this directly. See module docstring.
+        legacy_product_key = f"{prefix}product.json"
+        self.r2_client.put_object(
+            legacy_product_key, product_bytes, content_type="application/json"
+        )
+        entries.append(
             {
-                "path": "product.json",
-                "r2_key": product_key,
-                "size": len(product_bytes),
+                "relative_path": "product.json",
+                "sha256": product_cas["sha256"],
+                "size": product_cas["size"],
                 "content_type": "application/json",
-                "sha256": hashlib.sha256(product_bytes).hexdigest(),
+                "source_url": None,
             }
         )
-        total_bytes += len(product_bytes)
+        total_bytes += product_cas["size"]
 
         # 2. images (sorted by position; missing position pushes to end)
         images = product.get("images") or []
         if not isinstance(images, list):
             images = []
         sorted_images = sorted(
-            images, key=lambda img: img.get("position") if isinstance(img.get("position"), int) else 10**9
+            images,
+            key=lambda img: img.get("position")
+            if isinstance(img.get("position"), int)
+            else 10**9,
         )
 
-        # +1 for product.json already written above
+        # +1 for product.json above
         total_count = max(len(sorted_images) + 1, 1)
         emitted = 1
         self._emit("file", progress=emitted / total_count, message="product.json")
@@ -174,61 +202,43 @@ class ProductPullService:
             if not isinstance(src, str) or not src:
                 continue
             if not isinstance(position, int):
-                position = len(files)  # deterministic-ish fallback
+                position = len(entries)  # deterministic-ish fallback
             ext = _extract_image_ext(src)
             body, fetched_ct = self.downloader(src)
-            content_type = fetched_ct if ext == "bin" else _content_type_for_ext(ext)
-            path = f"image-{position}.{ext}"
-            r2_key = f"{prefix}{path}"
-            self.r2_client.put_object(r2_key, body, content_type=content_type)
-            files.append(
+            content_type = (
+                fetched_ct if ext == "bin" else _content_type_for_ext(ext)
+            )
+            cas = put_or_link(self.r2_client, tenant_id, body, content_type)
+            if cas["deduped"]:
+                deduped_count += 1
+            relative_path = f"image-{position}.{ext}"
+            entries.append(
                 {
-                    "path": path,
-                    "r2_key": r2_key,
-                    "size": len(body),
+                    "relative_path": relative_path,
+                    "sha256": cas["sha256"],
+                    "size": cas["size"],
                     "content_type": content_type,
-                    "sha256": hashlib.sha256(body).hexdigest(),
-                    "shopify_image_id": image.get("id"),
-                    "src": src,
+                    "source_url": src,
                 }
             )
-            total_bytes += len(body)
+            total_bytes += cas["size"]
             emitted += 1
-            self._emit("file", progress=emitted / total_count, message=path)
+            self._emit(
+                "file", progress=emitted / total_count, message=relative_path
+            )
 
-        # 3. manifest last
-        variants = product.get("variants") or []
-        if not isinstance(variants, list):
-            variants = []
-        image_count = sum(1 for f in files if f["path"] != "product.json")
-        manifest = {
-            "snapshot_id": snapshot_id,
-            "shop_domain": shop_domain,
-            "product_id": product.get("id", product_id),
-            "product_handle": product.get("handle", ""),
-            "product_title": product.get("title", ""),
-            "files": files,
-            "summary": {
-                "file_count": len(files),
-                "total_bytes": total_bytes,
-                "image_count": image_count,
-                "variant_count": len(variants),
-            },
-        }
-        manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
         self._emit("manifest_writing", progress=0.99, message="manifest.json")
-        self.r2_client.put_object(
-            manifest_key, manifest_bytes, content_type="application/json"
-        )
+        manifest_key = write_manifest(self.r2_client, prefix, entries)
 
         completed_at = _now_iso()
         elapsed = round(time.perf_counter() - clock_start, 3)
         logger.info(
-            "product pull done shop=%s snapshot=%s product=%s files=%d bytes=%d elapsed=%ss",
+            "product pull done shop=%s snapshot=%s product=%s files=%d deduped=%d bytes=%d elapsed=%ss",
             shop_domain,
             snapshot_id,
             product_id,
-            len(files),
+            len(entries),
+            deduped_count,
             total_bytes,
             elapsed,
         )
@@ -237,8 +247,9 @@ class ProductPullService:
             "snapshot_id": snapshot_id,
             "r2_prefix": prefix,
             "manifest_key": manifest_key,
-            "file_count": len(files),
+            "file_count": len(entries),
             "total_bytes": total_bytes,
+            "deduped_count": deduped_count,
             "started_at": started_at,
             "completed_at": completed_at,
         }
@@ -252,13 +263,8 @@ class ProductPullService:
         product_id: int,
     ) -> dict:
         prefix = _r2_prefix(tenant_id, store_id, snapshot_id)
-        manifest_key = f"{prefix}manifest.json"
         started_at = _now_iso()
 
-        # Synthetic product with 2 images. We DO upload to R2 in dry-run so
-        # that downstream consumers (e.g. backend SnapshotGenerationService)
-        # can fetch product.json by key without 404. R2 errors are swallowed
-        # so dry-run still works without R2 configured.
         synthetic_product = {
             "id": product_id or 999,
             "handle": "dry-run-product",
@@ -280,29 +286,35 @@ class ProductPullService:
             "snapshot_id": snapshot_id,
         }
 
-        files: list[dict] = []
+        entries: list[ManifestEntry] = []
         total_bytes = 0
+        deduped_count = 0
 
-        # 1. product.json
+        # product.json — CAS + legacy key (matches real path)
         product_bytes = json.dumps(
             synthetic_product, ensure_ascii=False, indent=2
         ).encode("utf-8")
-        product_key = f"{prefix}product.json"
-        _try_put_object(
-            self.r2_client, product_key, product_bytes, "application/json"
+        product_cas = _safe_put_or_link(
+            self.r2_client, tenant_id, product_bytes, "application/json"
         )
-        files.append(
+        if product_cas["deduped"]:
+            deduped_count += 1
+        legacy_product_key = f"{prefix}product.json"
+        _try_put_object(
+            self.r2_client, legacy_product_key, product_bytes, "application/json"
+        )
+        entries.append(
             {
-                "path": "product.json",
-                "r2_key": product_key,
-                "size": len(product_bytes),
+                "relative_path": "product.json",
+                "sha256": product_cas["sha256"],
+                "size": product_cas["size"],
                 "content_type": "application/json",
-                "sha256": hashlib.sha256(product_bytes).hexdigest(),
+                "source_url": None,
             }
         )
-        total_bytes += len(product_bytes)
+        total_bytes += product_cas["size"]
 
-        # 2. images — deterministic pseudo-binary content per file.
+        # images — deterministic pseudo-binary content per file.
         synthetic_images = [
             (
                 1,
@@ -322,70 +334,37 @@ class ProductPullService:
             ),
         ]
         for position, ext, body in synthetic_images:
-            path = f"image-{position}.{ext}"
-            r2_key = f"{prefix}{path}"
             content_type = _content_type_for_ext(ext)
-            _try_put_object(self.r2_client, r2_key, body, content_type)
-            files.append(
+            cas = _safe_put_or_link(self.r2_client, tenant_id, body, content_type)
+            if cas["deduped"]:
+                deduped_count += 1
+            entries.append(
                 {
-                    "path": path,
-                    "r2_key": r2_key,
-                    "size": len(body),
+                    "relative_path": f"image-{position}.{ext}",
+                    "sha256": cas["sha256"],
+                    "size": cas["size"],
                     "content_type": content_type,
-                    "sha256": hashlib.sha256(body).hexdigest(),
-                    "shopify_image_id": 9000 + position,
-                    "src": f"https://cdn/dry-run/image-{position}.{ext}",
+                    "source_url": f"https://cdn/dry-run/image-{position}.{ext}",
                 }
             )
-            total_bytes += len(body)
+            total_bytes += cas["size"]
 
-        # 3. manifest last — mirror the real-path manifest schema so backend
-        #    sees a consistent shape.
-        image_count = sum(1 for f in files if f["path"] != "product.json")
-        manifest = {
-            "snapshot_id": snapshot_id,
-            "shop_domain": shop_domain,
-            "product_id": synthetic_product["id"],
-            "product_handle": synthetic_product["handle"],
-            "product_title": synthetic_product["title"],
-            "files": files,
-            "summary": {
-                "file_count": len(files),
-                "total_bytes": total_bytes,
-                "image_count": image_count,
-                "variant_count": len(synthetic_product["variants"]),
-            },
-            "dry_run": True,
-        }
-        manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
-        _try_put_object(
-            self.r2_client, manifest_key, manifest_bytes, "application/json"
-        )
+        manifest_key = _safe_write_manifest(self.r2_client, prefix, entries)
 
         logger.info(
             "product pull DRY-RUN shop=%s snapshot=%s synthetic_files=%d",
             shop_domain,
             snapshot_id,
-            len(files),
+            len(entries),
         )
         return {
             "snapshot_id": snapshot_id,
             "r2_prefix": prefix,
             "manifest_key": manifest_key,
-            "file_count": len(files),
+            "file_count": len(entries),
             "total_bytes": total_bytes,
+            "deduped_count": deduped_count,
             "started_at": started_at,
             "completed_at": _now_iso(),
             "dry_run": True,
         }
-
-
-def _content_type_for_ext(ext: str) -> str:
-    return {
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "png": "image/png",
-        "webp": "image/webp",
-        "gif": "image/gif",
-        "avif": "image/avif",
-    }.get(ext, "application/octet-stream")

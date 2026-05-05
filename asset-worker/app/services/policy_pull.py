@@ -1,14 +1,12 @@
 """
-Policy pull orchestration.
+Policy pull orchestration (CAS-backed, Track AS2).
 
-Mirrors :mod:`app.services.theme_pull` for shop policies (privacy /
-refund / terms / shipping / ...). Each policy is written as a single
-JSON document under the snapshot's R2 prefix and a manifest is uploaded
-last.
+Pulls each shop policy (privacy / refund / TOS / shipping / ...) as JSON
+through the CAS layer and writes a single manifest at the snapshot
+prefix listing every relative_path -> sha256 mapping.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
@@ -16,8 +14,10 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from app.clients.shopify_admin import ShopifyAdminClient
-from app.services._dry_run import try_put_object as _try_put_object
+from app.services.cas_storage import put_or_link
+from app.services.manifest_writer import ManifestEntry, write_manifest
 from app.services.progress import ProgressEmitter
+from app.services.theme_pull import _safe_put_or_link, _safe_write_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def _now_iso() -> str:
 
 
 class PolicyPullService:
-    """Orchestrates shopify-cli + Admin REST + R2 to materialize shop policies."""
+    """Orchestrates shopify-cli + Admin REST + CAS R2 to materialize shop policies."""
 
     def __init__(
         self,
@@ -85,7 +85,6 @@ class PolicyPullService:
         snapshot_id: int,
     ) -> dict:
         prefix = _r2_prefix(tenant_id, store_id, snapshot_id)
-        manifest_key = f"{prefix}manifest.json"
         started_at = _now_iso()
         clock_start = time.perf_counter()
 
@@ -93,47 +92,41 @@ class PolicyPullService:
         admin = self.admin_factory(shop_domain, token)
         policies = admin.get_policies()
 
-        files: list[dict] = []
+        entries: list[ManifestEntry] = []
         total_bytes = 0
+        deduped_count = 0
         total = max(len(policies), 1)
         for idx, policy in enumerate(policies):
             handle = policy.get("handle") or f"policy-{policy.get('id', 'unknown')}"
+            relative_path = f"{handle}.json"
             body = json.dumps(policy, ensure_ascii=False, indent=2).encode("utf-8")
-            r2_key = f"{prefix}{handle}.json"
-            self.r2_client.put_object(r2_key, body, content_type="application/json")
-            files.append(
+            cas = put_or_link(self.r2_client, tenant_id, body, "application/json")
+            if cas["deduped"]:
+                deduped_count += 1
+            entries.append(
                 {
-                    "path": f"{handle}.json",
-                    "r2_key": r2_key,
-                    "handle": handle,
-                    "title": policy.get("title", ""),
-                    "size": len(body),
+                    "relative_path": relative_path,
+                    "sha256": cas["sha256"],
+                    "size": cas["size"],
                     "content_type": "application/json",
-                    "sha256": hashlib.sha256(body).hexdigest(),
+                    "source_url": None,
                 }
             )
-            total_bytes += len(body)
-            self._emit("file", progress=(idx + 1) / total, message=f"{handle}.json")
+            total_bytes += cas["size"]
+            self._emit(
+                "file", progress=(idx + 1) / total, message=relative_path
+            )
 
-        manifest = {
-            "snapshot_id": snapshot_id,
-            "shop_domain": shop_domain,
-            "kind": "policy",
-            "files": files,
-            "summary": {"file_count": len(files), "total_bytes": total_bytes},
-        }
-        manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
         self._emit("manifest_writing", progress=0.99, message="manifest.json")
-        self.r2_client.put_object(
-            manifest_key, manifest_bytes, content_type="application/json"
-        )
+        manifest_key = write_manifest(self.r2_client, prefix, entries)
 
         elapsed = round(time.perf_counter() - clock_start, 3)
         logger.info(
-            "policy pull done shop=%s snapshot=%s files=%d bytes=%d elapsed=%ss",
+            "policy pull done shop=%s snapshot=%s files=%d deduped=%d bytes=%d elapsed=%ss",
             shop_domain,
             snapshot_id,
-            len(files),
+            len(entries),
+            deduped_count,
             total_bytes,
             elapsed,
         )
@@ -141,8 +134,9 @@ class PolicyPullService:
             "snapshot_id": snapshot_id,
             "r2_prefix": prefix,
             "manifest_key": manifest_key,
-            "file_count": len(files),
+            "file_count": len(entries),
             "total_bytes": total_bytes,
+            "deduped_count": deduped_count,
             "started_at": started_at,
             "completed_at": _now_iso(),
         }
@@ -155,15 +149,15 @@ class PolicyPullService:
         snapshot_id: int,
     ) -> dict:
         prefix = _r2_prefix(tenant_id, store_id, snapshot_id)
-        manifest_key = f"{prefix}manifest.json"
         started_at = _now_iso()
 
         synthetic = [
             ("privacy-policy", "Privacy Policy"),
             ("terms-of-service", "Terms of Service"),
         ]
-        files: list[dict] = []
+        entries: list[ManifestEntry] = []
         total_bytes = 0
+        deduped_count = 0
         for handle, title in synthetic:
             body = json.dumps(
                 {
@@ -176,46 +170,37 @@ class PolicyPullService:
                 ensure_ascii=False,
                 indent=2,
             ).encode("utf-8")
-            r2_key = f"{prefix}{handle}.json"
-            _try_put_object(self.r2_client, r2_key, body, "application/json")
-            files.append(
+            cas = _safe_put_or_link(
+                self.r2_client, tenant_id, body, "application/json"
+            )
+            if cas["deduped"]:
+                deduped_count += 1
+            entries.append(
                 {
-                    "path": f"{handle}.json",
-                    "r2_key": r2_key,
-                    "handle": handle,
-                    "title": title,
-                    "size": len(body),
+                    "relative_path": f"{handle}.json",
+                    "sha256": cas["sha256"],
+                    "size": cas["size"],
                     "content_type": "application/json",
-                    "sha256": hashlib.sha256(body).hexdigest(),
+                    "source_url": None,
                 }
             )
-            total_bytes += len(body)
+            total_bytes += cas["size"]
 
-        manifest = {
-            "snapshot_id": snapshot_id,
-            "shop_domain": shop_domain,
-            "kind": "policy",
-            "files": files,
-            "summary": {"file_count": len(files), "total_bytes": total_bytes},
-            "dry_run": True,
-        }
-        manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
-        _try_put_object(
-            self.r2_client, manifest_key, manifest_bytes, "application/json"
-        )
+        manifest_key = _safe_write_manifest(self.r2_client, prefix, entries)
 
         logger.info(
             "policy pull DRY-RUN shop=%s snapshot=%s synthetic=%d",
             shop_domain,
             snapshot_id,
-            len(files),
+            len(entries),
         )
         return {
             "snapshot_id": snapshot_id,
             "r2_prefix": prefix,
             "manifest_key": manifest_key,
-            "file_count": len(files),
+            "file_count": len(entries),
             "total_bytes": total_bytes,
+            "deduped_count": deduped_count,
             "started_at": started_at,
             "completed_at": _now_iso(),
             "dry_run": True,
