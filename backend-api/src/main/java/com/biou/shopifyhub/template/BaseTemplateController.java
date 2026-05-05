@@ -9,6 +9,7 @@ import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.template.entity.BaseTemplate;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -55,51 +56,63 @@ public class BaseTemplateController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     public Result<Long> create(@RequestBody BaseTemplateService.CreateRequest req) {
-        // TODO RBAC: restrict to PLATFORM_SUPER role
+        // RBAC P3.4: 模板管理是平台级动作（运营 / 一键开店都依赖共享模板库），仅
+        // PLATFORM:TEMPLATE_MANAGE 权限可改。读路径（list/detail）放宽给所有 authed 用户。
         return Result.ok(service.create(req, CurrentUser.userIdOrNull()));
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     public Result<Void> update(@PathVariable Long id, @RequestBody BaseTemplateService.UpdateRequest req) {
-        // TODO RBAC: restrict to PLATFORM_SUPER role
+        // RBAC P3.4: 模板管理是平台级动作（运营 / 一键开店都依赖共享模板库），仅
+        // PLATFORM:TEMPLATE_MANAGE 权限可改。读路径（list/detail）放宽给所有 authed 用户。
         service.update(id, req);
         return Result.ok();
     }
 
     @PostMapping("/{id}/publish")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     @RequireSensitiveOp("TEMPLATE_PUBLISH")
     public Result<Void> publish(@PathVariable Long id) {
-        // TODO RBAC: restrict to PLATFORM_SUPER role
+        // RBAC P3.4: 模板管理是平台级动作（运营 / 一键开店都依赖共享模板库），仅
+        // PLATFORM:TEMPLATE_MANAGE 权限可改。读路径（list/detail）放宽给所有 authed 用户。
         service.publish(id);
         return Result.ok();
     }
 
     @PostMapping("/{id}/deprecate")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     @RequireSensitiveOp("TEMPLATE_DEPRECATE")
     public Result<Void> deprecate(@PathVariable Long id) {
-        // TODO RBAC: restrict to PLATFORM_SUPER role
+        // RBAC P3.4: 模板管理是平台级动作（运营 / 一键开店都依赖共享模板库），仅
+        // PLATFORM:TEMPLATE_MANAGE 权限可改。读路径（list/detail）放宽给所有 authed 用户。
         service.deprecate(id);
         return Result.ok();
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     @RequireSensitiveOp("TEMPLATE_DELETE")
     public Result<Void> delete(@PathVariable Long id) {
-        // TODO RBAC: restrict to PLATFORM_SUPER role
+        // RBAC P3.4: 模板管理是平台级动作（运营 / 一键开店都依赖共享模板库），仅
+        // PLATFORM:TEMPLATE_MANAGE 权限可改。读路径（list/detail）放宽给所有 authed 用户。
         service.delete(id);
         return Result.ok();
     }
 
     /** 上传新版本（zip multipart）。 */
     @PostMapping("/{id}/version")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     @RequireSensitiveOp("TEMPLATE_VERSION_UPLOAD")
     public Result<Long> uploadVersion(@PathVariable Long id,
                                       @RequestParam("version") String version,
                                       @RequestParam(value = "changelog", required = false) String changelog,
                                       @RequestParam(value = "defaultReplaceRules", required = false) String defaultReplaceRulesJson,
                                       @RequestParam("file") MultipartFile file) throws Exception {
-        // TODO RBAC: restrict to PLATFORM_SUPER role
+        // RBAC P3.4: 模板管理是平台级动作（运营 / 一键开店都依赖共享模板库），仅
+        // PLATFORM:TEMPLATE_MANAGE 权限可改。读路径（list/detail）放宽给所有 authed 用户。
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ResultCode.VALIDATION_FAILED, "file empty");
         }
@@ -119,8 +132,10 @@ public class BaseTemplateController {
     }
 
     @PostMapping("/{id}/default-version/{versionId}")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     public Result<Void> setDefaultVersion(@PathVariable Long id, @PathVariable Long versionId) {
-        // TODO RBAC: restrict to PLATFORM_SUPER role
+        // RBAC P3.4: 模板管理是平台级动作（运营 / 一键开店都依赖共享模板库），仅
+        // PLATFORM:TEMPLATE_MANAGE 权限可改。读路径（list/detail）放宽给所有 authed 用户。
         service.setDefaultVersion(id, versionId);
         return Result.ok();
     }

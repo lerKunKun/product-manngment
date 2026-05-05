@@ -8,6 +8,7 @@ import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.guide.entity.GuideDoc;
 import com.biou.shopifyhub.guide.mapper.GuideDocMapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -74,6 +75,7 @@ public class GuideDocController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     public Result<Long> create(@RequestBody GuideDoc body) {
         if (body.getCode() == null || body.getCode().isBlank()) {
             return Result.error(ResultCode.VALIDATION_FAILED, "code required");
@@ -91,6 +93,7 @@ public class GuideDocController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     public Result<Void> update(@PathVariable Long id, @RequestBody GuideDoc body) {
         GuideDoc existing = mapper.selectById(id);
         if (existing == null) {
@@ -105,6 +108,7 @@ public class GuideDocController {
     }
 
     @PostMapping("/{id}/publish")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     @RequireSensitiveOp("GUIDE_PUBLISH")
     public Result<Void> publish(@PathVariable Long id) {
         GuideDoc g = mapper.selectById(id);
@@ -117,6 +121,7 @@ public class GuideDocController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_PLATFORM:TEMPLATE_MANAGE')")
     @RequireSensitiveOp("GUIDE_DELETE")
     public Result<Void> delete(@PathVariable Long id) {
         mapper.deleteById(id);

@@ -14,6 +14,7 @@ import com.biou.shopifyhub.purchase.mapper.PurchaseInfoMapper;
 import com.biou.shopifyhub.purchase.mapper.SkuChangeLogMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -43,6 +44,7 @@ public class PurchaseController {
 
     /** 查询某产品下所有变体的采购信息（按变体 join） */
     @GetMapping("/product/{productId}/purchase")
+    @PreAuthorize("hasAuthority('PERM_PURCHASE:READ')")
     public Result<List<Map<String, Object>>> listByProduct(@PathVariable Long productId) {
         List<ProductVariant> variants = variantMapper.selectList(
             new QueryWrapper<ProductVariant>().eq("product_id", productId).orderByAsc("position"));
@@ -76,6 +78,7 @@ public class PurchaseController {
 
     /** Upsert 变体的采购信息 */
     @PutMapping("/variant/{variantId}/purchase")
+    @PreAuthorize("hasAuthority('PERM_PURCHASE:READ')")
     public Result<Void> upsert(@PathVariable Long variantId, @RequestBody PurchaseInfo input) {
         ProductVariant v = variantMapper.selectById(variantId);
         if (v == null) throw new BusinessException(ResultCode.NOT_FOUND, "变体不存在");
@@ -111,6 +114,7 @@ public class PurchaseController {
      * Wave 1 简化：仅改本地 product_variant.sku；推送到所有映射店铺留 W2。
      */
     @RequireSensitiveOp("PURCHASE_SKU_EDIT")
+    @PreAuthorize("hasAuthority('PERM_PURCHASE:SKU_EDIT')")
     @PostMapping("/variant/{variantId}/sku")
     @Transactional
     public Result<Map<String, Long>> changeSku(
@@ -147,6 +151,7 @@ public class PurchaseController {
     }
 
     @GetMapping("/variant/{variantId}/sku-log")
+    @PreAuthorize("hasAuthority('PERM_PURCHASE:READ')")
     public Result<List<SkuChangeLog>> listLog(@PathVariable Long variantId) {
         return Result.ok(skuLogMapper.selectList(
             new QueryWrapper<SkuChangeLog>().eq("variant_id", variantId).orderByDesc("confirmed_at")));

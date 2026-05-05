@@ -6,6 +6,7 @@ import com.biou.shopifyhub.preview.entity.PreviewTheme;
 import com.biou.shopifyhub.preview.mapper.PreviewThemeMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -49,6 +50,7 @@ public class PreviewController {
 
     /** Allocate a preview slot + drive worker build. Returns the row reflecting the latest status. */
     @PostMapping
+    @PreAuthorize("hasAuthority('PERM_THEME:DEPLOY')")
     public Result<PreviewTheme> allocate(@RequestBody AllocateRequest req) {
         PreviewTheme p = allocator.allocate(req.tenantId(), req.sourceProductId());
         try {
@@ -64,6 +66,7 @@ public class PreviewController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
     public Result<PreviewTheme> get(@PathVariable Long id) {
         PreviewTheme p = previewMapper.selectById(id);
         if (p == null) return Result.error(40404, "preview not found");
@@ -71,6 +74,7 @@ public class PreviewController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
     public Result<List<PreviewTheme>> list(@RequestParam(required = false) Long sourceProductId,
                                            @RequestParam(required = false) Long devStoreId,
                                            @RequestParam(required = false) String status) {
@@ -84,6 +88,7 @@ public class PreviewController {
 
     /** Mark accessed (frontend calls this when user opens the preview URL). */
     @PostMapping("/{id}/accessed")
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
     public Result<Void> markAccessed(@PathVariable Long id) {
         allocator.markAccessed(id);
         return Result.ok();
