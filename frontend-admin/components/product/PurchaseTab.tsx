@@ -14,6 +14,15 @@ const inpSm =
 
 type Currency = "USD" | "CNY";
 
+/** 批量编辑字段：成本 / 克重 / 物流标签（前两个数值，后一个文本） */
+type BatchField = "cost" | "grossWeight" | "logisticsTags";
+
+const BATCH_LABEL: Record<BatchField, string> = {
+  cost: "成本",
+  grossWeight: "克重 (g)",
+  logisticsTags: "物流标签",
+};
+
 type Draft = {
   cost: string;
   grossWeight: string;
@@ -64,6 +73,12 @@ export function PurchaseTab({ productId }: { productId: number }) {
   const [switching, setSwitching] = useState(false);
   // 复用顶栏汇率 API（后端 Redis 1h 缓存）
   const [rate, setRate] = useState<UsdCnyRate | null>(null);
+
+  // 批量选择（按 variantId）+ 批量编辑 popover
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [batchField, setBatchField] = useState<BatchField | null>(null);
+  const [batchValue, setBatchValue] = useState("");
+  const [batchApplying, setBatchApplying] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,6 +154,63 @@ export function PurchaseTab({ productId }: { productId: number }) {
 
   function setField(variantId: number, k: keyof Draft, v: string) {
     setDrafts((d) => ({ ...d, [variantId]: { ...d[variantId], [k]: v } }));
+  }
+
+  // ===== 批量选择 / 批量编辑 =====
+  const allChecked = rows.length > 0 && selectedIds.size === rows.length;
+  const indeterminate = selectedIds.size > 0 && selectedIds.size < rows.length;
+
+  function toggleAll() {
+    if (allChecked) setSelectedIds(new Set());
+    else setSelectedIds(new Set(rows.map((r) => r.variantId)));
+  }
+  function toggleOne(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setBatchField(null);
+    setBatchValue("");
+  }
+
+  /** 串行循环 updateVariant；汇总成功 / 失败计数。 */
+  async function applyBatch() {
+    if (!batchField || selectedIds.size === 0) return;
+    const raw = batchValue.trim();
+    if (raw === "" && batchField !== "logisticsTags") {
+      toast.warn("请输入新值");
+      return;
+    }
+    const ids = [...selectedIds];
+    setBatchApplying(true);
+    let ok = 0;
+    let fail = 0;
+    const patch: Partial<PurchaseInfo> =
+      batchField === "logisticsTags"
+        ? { logisticsTags: raw }
+        : batchField === "cost"
+          ? { cost: raw === "" ? undefined : Number(raw), currency: productCurrency }
+          : { grossWeight: raw === "" ? undefined : Number(raw) };
+    for (const id of ids) {
+      try {
+        await purchaseApi.updateVariant(id, patch);
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setBatchApplying(false);
+    if (fail === 0) toast.success(`✓ 批量更新 ${BATCH_LABEL[batchField]}（${ok}/${ids.length}）`);
+    else toast.error(`部分失败：成功 ${ok}，失败 ${fail}`);
+    setBatchField(null);
+    setBatchValue("");
+    setSelectedIds(new Set());
+    load();
   }
 
   async function commit(row: PurchaseInfo) {
@@ -219,10 +291,84 @@ export function PurchaseTab({ productId }: { productId: number }) {
         </div>
       </div>
 
+      {/* Shopify 风格批量操作条：选中 ≥1 时显示 */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          <span className="font-medium">已选 {selectedIds.size} 项</span>
+          <span className="text-muted-foreground">·</span>
+          {(["cost", "grossWeight", "logisticsTags"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setBatchField(batchField === f ? null : f)}
+              className={
+                "rounded border px-2.5 py-1 text-xs transition-colors " +
+                (batchField === f
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "hover:bg-accent")
+              }
+            >
+              {BATCH_LABEL[f]}
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-2">
+            {batchField && (
+              <div className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1">
+                <span className="text-xs text-muted-foreground">
+                  {batchField === "cost"
+                    ? `新成本 ${CURRENCY_SYMBOL[productCurrency]}`
+                    : batchField === "grossWeight"
+                      ? "新克重"
+                      : "新标签"}
+                </span>
+                <input
+                  type={batchField === "logisticsTags" ? "text" : "number"}
+                  step={batchField === "cost" ? "0.01" : batchField === "grossWeight" ? "0.01" : undefined}
+                  value={batchValue}
+                  onChange={(e) => setBatchValue(e.target.value)}
+                  autoFocus
+                  className="w-32 bg-transparent text-sm focus:outline-none"
+                  placeholder={batchField === "logisticsTags" ? "液体,带电" : "数值"}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !batchApplying) applyBatch();
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={applyBatch}
+                  disabled={batchApplying}
+                  className="rounded bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {batchApplying ? "..." : "应用"}
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              取消选择
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
+              <th className="w-10 px-2 py-2 text-left">
+                <input
+                  type="checkbox"
+                  aria-label="全选"
+                  checked={allChecked}
+                  ref={(el) => {
+                    if (el) el.indeterminate = indeterminate;
+                  }}
+                  onChange={toggleAll}
+                />
+              </th>
               <th className="px-2 py-2 text-left">SKU</th>
               <th className="px-2 py-2 text-right">采购成本（{CURRENCY_SYMBOL[productCurrency]} {productCurrency}）</th>
               <th className="px-2 py-2 text-right">克重 (g)</th>
@@ -235,15 +381,27 @@ export function PurchaseTab({ productId }: { productId: number }) {
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
                   暂无采购数据
                 </td>
               </tr>
             )}
             {rows.map((r) => {
               const d = drafts[r.variantId] ?? toDraft(r);
+              const checked = selectedIds.has(r.variantId);
               return (
-                <tr key={r.variantId} className="border-t">
+                <tr
+                  key={r.variantId}
+                  className={"border-t " + (checked ? "bg-primary/[0.03]" : "")}
+                >
+                  <td className="px-2 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`选择 ${r.sku || r.variantId}`}
+                      checked={checked}
+                      onChange={() => toggleOne(r.variantId)}
+                    />
+                  </td>
                   <td className="px-2 py-2 font-mono text-xs">
                     <div className="flex items-center gap-2">
                       <span>{r.sku || "—"}</span>
