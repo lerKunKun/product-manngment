@@ -436,6 +436,16 @@ export const messages = {
     "sensitiveCode.codeRequired": "请输入验证码",
     "sensitiveCode.confirm": "确认",
     "sensitiveCode.devFallback": "dev 模式：码已打印到后端控制台（查看 mvn 终端）",
+
+    // AS1-05：店铺列表同步状态徽章 + 重新同步按钮
+    "stores.sync.badge.pending": "同步中",
+    "stores.sync.badge.running": "同步中",
+    "stores.sync.badge.success": "已同步",
+    "stores.sync.badge.partial": "部分成功",
+    "stores.sync.badge.failed": "同步失败",
+    "stores.sync.badge.never": "未同步",
+    "stores.sync.resync": "重新同步",
+    "stores.sync.resyncToast": "已触发重新同步（snapshotId={id}）",
   },
   "en-US": {
     "common.save": "Save",
@@ -874,6 +884,16 @@ export const messages = {
     "sensitiveCode.codeRequired": "Please enter the code",
     "sensitiveCode.confirm": "Confirm",
     "sensitiveCode.devFallback": "Dev mode: code printed to backend console (check the mvn terminal)",
+
+    // AS1-05: store list sync-status badge + resync button
+    "stores.sync.badge.pending": "Syncing",
+    "stores.sync.badge.running": "Syncing",
+    "stores.sync.badge.success": "Synced",
+    "stores.sync.badge.partial": "Partial",
+    "stores.sync.badge.failed": "Sync failed",
+    "stores.sync.badge.never": "Not synced",
+    "stores.sync.resync": "Resync",
+    "stores.sync.resyncToast": "Resync triggered (snapshotId={id})",
   },
 } as const;
 

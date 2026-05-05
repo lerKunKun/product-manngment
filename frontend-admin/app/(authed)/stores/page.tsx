@@ -10,9 +10,17 @@ import {
   type MetricsPeriod,
   METRICS_PERIOD_LABEL,
 } from "@/lib/api/store";
+import {
+  assetApi,
+  type AssetSyncStatus,
+  type LatestStoreSnapshot,
+} from "@/lib/api/asset";
 import { useStores, useInvalidateStores } from "@/lib/queries/stores";
 import { useToast } from "@/components/ui/Toast";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
+import { useI18n } from "@/lib/i18n/context";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
+import type { MessageKey } from "@/lib/i18n/messages";
 
 /** 域名 → 国旗 emoji。覆盖 biou-XX.myshopify.com 命名约定 + 兜底 🌐 */
 const COUNTRY_FLAG: Record<string, string> = {
@@ -131,14 +139,97 @@ const SENSITIVE_DELETE = "STORE_DELETE";
 const SENSITIVE_DISABLE = "STORE_BATCH_DISABLE";
 const SENSITIVE_PARTNER = "STORE_MARK_PARTNER_COLLAB";
 
+/** AS1-05：同步状态徽章——颜色 + i18n key 映射。 */
+const SYNC_BADGE_INFO: Record<
+  AssetSyncStatus | "NEVER",
+  { i18nKey: MessageKey; cls: string }
+> = {
+  PENDING: {
+    i18nKey: "stores.sync.badge.pending",
+    cls: "bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-500/15 dark:text-blue-400",
+  },
+  RUNNING: {
+    i18nKey: "stores.sync.badge.running",
+    cls: "bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-500/15 dark:text-blue-400",
+  },
+  SUCCESS: {
+    i18nKey: "stores.sync.badge.success",
+    cls: "bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-500/15 dark:text-emerald-400",
+  },
+  PARTIAL: {
+    i18nKey: "stores.sync.badge.partial",
+    cls: "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-400",
+  },
+  FAILED: {
+    i18nKey: "stores.sync.badge.failed",
+    cls: "bg-rose-100 text-rose-700 border-rose-300 dark:bg-rose-500/15 dark:text-rose-400",
+  },
+  CANCELED: {
+    i18nKey: "stores.sync.badge.failed",
+    cls: "bg-zinc-100 text-zinc-600 border-zinc-300 dark:bg-zinc-500/15 dark:text-zinc-400",
+  },
+  NEVER: {
+    i18nKey: "stores.sync.badge.never",
+    cls: "bg-zinc-100 text-zinc-600 border-zinc-300 dark:bg-zinc-500/15 dark:text-zinc-400",
+  },
+};
+
+function syncStatusKey(latest: LatestStoreSnapshot | null | undefined): AssetSyncStatus | "NEVER" {
+  if (!latest) return "NEVER";
+  return latest.status;
+}
+
 export default function StoresPage() {
   const toast = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t } = useI18n();
   const { data, isPending, error } = useStores();
   const invalidate = useInvalidateStores();
+  const queryClient = useQueryClient();
   const stores: StoreItem[] = data ?? [];
   const errorMsg = error ? (error as Error).message : "";
+
+  // AS1-05：每店拉一次最近一次 FULL 快照——徽章用。失败 / 无记录都返回 latest=null。
+  // 同步中（PENDING/RUNNING）的店每 15s 轮询一次直到终态。
+  const latestSnaps = useQueries({
+    queries: stores.map((s) => ({
+      queryKey: ["asset-snapshot", "store", s.id, "latest"] as const,
+      queryFn: () => assetApi.latestForStore(s.id),
+      refetchInterval: (query: { state: { data?: { latest: LatestStoreSnapshot | null } } }) => {
+        const st = query.state.data?.latest?.status;
+        return st === "PENDING" || st === "RUNNING" ? 15_000 : false;
+      },
+      staleTime: 30_000,
+    })),
+  });
+  const latestByStoreId = useMemo(() => {
+    const m: Record<number, LatestStoreSnapshot | null> = {};
+    stores.forEach((s, i) => {
+      m[s.id] = latestSnaps[i]?.data?.latest ?? null;
+    });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stores, latestSnaps.map((q) => q.data?.latest?.status).join("|")]);
+
+  const [resyncing, setResyncing] = useState<Record<number, boolean>>({});
+  async function onResync(s: StoreItem) {
+    setResyncing((m) => ({ ...m, [s.id]: true }));
+    try {
+      const snapshotId = await assetApi.resync(s.id);
+      toast.success(
+        t("stores.sync.resyncToast").replace("{id}", String(snapshotId))
+      );
+      // 立刻拉一次徽章状态——后续轮询接管
+      queryClient.invalidateQueries({
+        queryKey: ["asset-snapshot", "store", s.id, "latest"],
+      });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setResyncing((m) => ({ ...m, [s.id]: false }));
+    }
+  }
 
   const summary = useMemo(() => {
     const total = stores.length;
@@ -409,6 +500,47 @@ export default function StoresPage() {
                           {fmtNumber(s.productCount ?? 0)}
                         </div>
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* AS1-05：同步状态徽章 + 重新同步 */}
+                {(() => {
+                  const latest = latestByStoreId[s.id] ?? null;
+                  const key = syncStatusKey(latest);
+                  const info = SYNC_BADGE_INFO[key];
+                  const isPending = key === "PENDING" || key === "RUNNING";
+                  const titleParts = [
+                    info ? t(info.i18nKey) : "",
+                    latest?.errorMessage,
+                    latest?.completedAt
+                      ? `completedAt: ${latest.completedAt}`
+                      : latest?.startedAt
+                      ? `startedAt: ${latest.startedAt}`
+                      : "",
+                  ].filter(Boolean);
+                  return (
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <span
+                        title={titleParts.join("\n")}
+                        className={
+                          "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium " +
+                          info.cls
+                        }
+                      >
+                        {isPending && <span className="inline-block animate-spin">⌛</span>}
+                        {t(info.i18nKey)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onResync(s)}
+                        disabled={!!resyncing[s.id] || isPending}
+                        title={t("stores.sync.resync")}
+                        className="rounded border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent disabled:opacity-50"
+                      >
+                        {resyncing[s.id] ? "…" : "↻ "}
+                        {t("stores.sync.resync")}
+                      </button>
                     </div>
                   );
                 })()}

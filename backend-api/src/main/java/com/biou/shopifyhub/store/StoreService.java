@@ -1,6 +1,7 @@
 package com.biou.shopifyhub.store;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.biou.shopifyhub.asset.sync.StoreConnectedEvent;
 import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.cache.CacheKeys;
 import com.biou.shopifyhub.core.cache.CacheService;
@@ -12,9 +13,11 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 
 @Service
@@ -25,14 +28,19 @@ public class StoreService {
     private final StoreMapper mapper;
     private final ShopifyApiClient shopify;
     private final CacheService cacheService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${ENCRYPT_KEY_AES_GCM:}")
     private String aesKey;
 
-    public StoreService(StoreMapper mapper, ShopifyApiClient shopify, CacheService cacheService) {
+    public StoreService(StoreMapper mapper,
+                        ShopifyApiClient shopify,
+                        CacheService cacheService,
+                        ApplicationEventPublisher eventPublisher) {
         this.mapper = mapper;
         this.shopify = shopify;
         this.cacheService = cacheService;
+        this.eventPublisher = eventPublisher;
     }
 
     public List<Store> list(Long tenantId) {
@@ -105,7 +113,33 @@ public class StoreService {
         mapper.insert(s);
         log.info("[store] connect custom_app id={} domain={} by={}", s.getId(), domain, invitedByUserId);
         invalidateListCache(s.getTenantId());
+        // AS1-01：发店铺接入事件，由 asset.sync 监听器在 AFTER_COMMIT 后触发全店静默同步。
+        publishStoreConnected(s, invitedByUserId);
         return s.getId();
+    }
+
+    /**
+     * AS1-01：店铺接入完成后发布事件。
+     *
+     * <p>由 {@code @TransactionalEventListener(AFTER_COMMIT)} 接住——事务回滚时不触发。
+     * 抽出 public 是为 OAuth 回调（在 controller 里直插 store 表）也能复用同一发件入口。
+     */
+    public void publishStoreConnected(Store store, Long triggeredBy) {
+        if (store == null || store.getId() == null || store.getTenantId() == null) {
+            log.warn("[store] publishStoreConnected skipped: missing id/tenantId store={}", store);
+            return;
+        }
+        try {
+            eventPublisher.publishEvent(new StoreConnectedEvent(
+                store.getId(),
+                store.getTenantId(),
+                triggeredBy,
+                Instant.now()
+            ));
+        } catch (Exception e) {
+            log.warn("[store] publishStoreConnected failed storeId={} err={}",
+                store.getId(), e.getMessage());
+        }
     }
 
     @Transactional
