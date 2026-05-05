@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/auth/store";
 import { authApi } from "@/lib/api/auth";
+import { userApi } from "@/lib/api/user";
+import { useAuth } from "@/lib/auth/permissions";
 import { useUnreadInboxCount } from "@/lib/queries/inbox";
 import { useI18n } from "@/lib/i18n/context";
 import type { MessageKey } from "@/lib/i18n/messages";
@@ -12,9 +14,12 @@ import { cn } from "@/lib/utils";
 import { Sheet, SheetHeader, SheetTitle, SheetContent } from "@/components/ui/Sheet";
 import { HeaderInfoBar } from "@/components/layout/HeaderInfoBar";
 
+/** P4：每个 nav 项可声明 anyPerm（任一命中即显示）。anyPerm 缺省 = 所有 authed 用户都看到。
+ *  这只是 UX gate（菜单显隐），后端 @PreAuthorize 才是真闸门——前端不应替代后端鉴权。 */
+type NavItem = { href: string; label: string; anyPerm?: string[] };
 type NavGroup = {
   section: string | null;
-  items: { href: string; label: string }[];
+  items: NavItem[];
 };
 
 function getNavGroups(t: (k: MessageKey) => string): NavGroup[] {
@@ -23,31 +28,32 @@ function getNavGroups(t: (k: MessageKey) => string): NavGroup[] {
     {
       section: t("nav.business"),
       items: [
-        { href: "/products", label: t("nav.products") },
-        { href: "/stores", label: t("nav.stores") },
-        { href: "/partner-stores", label: t("nav.partner-stores") },
-        { href: "/newstore", label: t("nav.newstore") },
+        { href: "/products", label: t("nav.products"), anyPerm: ["PRODUCT:READ"] },
+        { href: "/stores", label: t("nav.stores"), anyPerm: ["STORE:READ"] },
+        { href: "/partner-stores", label: t("nav.partner-stores"), anyPerm: ["STORE:READ"] },
+        { href: "/newstore", label: t("nav.newstore"), anyPerm: ["THEME:DEPLOY"] },
       ],
     },
     {
       section: t("nav.assets"),
       items: [
-        { href: "/assets", label: t("nav.assets-snapshot") },
-        { href: "/snapshots", label: t("nav.snapshots") },
+        { href: "/assets", label: t("nav.assets-snapshot"), anyPerm: ["THEME:PULL"] },
+        { href: "/snapshots", label: t("nav.snapshots"), anyPerm: ["PRODUCT:READ"] },
         { href: "/templates", label: t("nav.templates") },
       ],
     },
     {
       section: t("nav.flow"),
       items: [
-        { href: "/approvals", label: t("nav.approvals") },
-        { href: "/invitations", label: t("nav.invitations") },
-        { href: "/cross-auth", label: t("nav.cross-auth") },
+        { href: "/approvals", label: t("nav.approvals"), anyPerm: ["APPROVAL:SUBMIT", "APPROVAL:DECIDE"] },
+        { href: "/invitations", label: t("nav.invitations"), anyPerm: ["TEMP_USER:LIST", "TEMP_USER:INVITE"] },
+        { href: "/cross-auth", label: t("nav.cross-auth"), anyPerm: ["DATASCOPE:GRANT", "AUDIT:READ"] },
       ],
     },
     {
       section: t("nav.my"),
       items: [
+        // 个人中心 / 站内信 是用户对自己资源的访问，所有 authed 用户都看到
         { href: "/inbox", label: t("nav.inbox") },
         { href: "/profile", label: t("nav.profile") },
       ],
@@ -56,25 +62,34 @@ function getNavGroups(t: (k: MessageKey) => string): NavGroup[] {
       section: t("nav.tools"),
       items: [
         { href: "/tasks", label: t("nav.tasks") },
-        { href: "/recyclebin", label: t("nav.recyclebin") },
+        { href: "/recyclebin", label: t("nav.recyclebin"), anyPerm: ["RECYCLE_BIN:VIEW"] },
         { href: "/guides", label: t("nav.guides") },
       ],
     },
     {
       section: t("nav.system"),
       items: [
-        { href: "/orgs", label: t("nav.orgs") },
-        { href: "/admin/users", label: t("nav.users") },
-        { href: "/admin/role", label: t("nav.role") },
-        // TODO i18n: G2 新增「角色画布」入口（不动 lib/i18n/messages.ts）
-        { href: "/admin/canvas", label: "角色画布" },
-        { href: "/admin/datasources", label: t("nav.datasources") },
-        { href: "/admin/notification-log", label: t("nav.notification-log") },
-        { href: "/admin/audit-log", label: t("nav.audit-log") },
-        { href: "/admin/ops", label: t("nav.ops") },
+        // G3：单页 IAM（合并 组织 / 角色 / 用户 / 角色画布）
+        { href: "/iam", label: "IAM", anyPerm: ["USER:READ", "USER:MANAGE"] },
+        { href: "/admin/datasources", label: t("nav.datasources"), anyPerm: ["PLATFORM:TENANT_MANAGE"] },
+        { href: "/admin/notification-log", label: t("nav.notification-log"), anyPerm: ["NOTIFICATION:MANAGE"] },
+        { href: "/admin/audit-log", label: t("nav.audit-log"), anyPerm: ["AUDIT:READ"] },
+        { href: "/admin/ops", label: t("nav.ops"), anyPerm: ["OPS:READ", "OPS:MANAGE"] },
       ],
     },
   ];
+}
+
+/** 按用户权限过滤 nav：item 没声明 anyPerm 一律显；声明了则任一命中显。
+ *  整组所有 item 都被过滤 → 整组隐藏。 */
+function filterNavGroups(groups: NavGroup[], permissions: string[]): NavGroup[] {
+  const has = (codes: string[]) => codes.some((c) => permissions.includes(c));
+  const filtered: NavGroup[] = [];
+  for (const g of groups) {
+    const items = g.items.filter((it) => !it.anyPerm || has(it.anyPerm));
+    if (items.length > 0) filtered.push({ section: g.section, items });
+  }
+  return filtered;
 }
 
 function NavList({
@@ -132,14 +147,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { locale, setLocale, t } = useI18n();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // 顶栏头像：authStore.user 不带 avatarUrl（refresh 端点没返），单独拉一次 /me。
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
-  const navGroups = getNavGroups(t);
+  // RBAC：按用户实际权限过滤 nav。permissions 由 (authed)/layout 的 boot + 心跳同步进 zustand。
+  const { permissions } = useAuth();
+  const navGroups = filterNavGroups(getNavGroups(t), permissions);
 
   useEffect(() => {
     setTheme(
       document.documentElement.classList.contains("dark") ? "dark" : "light"
     );
   }, []);
+
+  // 加载头像（仅本会话内拉一次；登录 / impersonate 切换会触发 user.userId 变化重新拉）
+  useEffect(() => {
+    if (!user?.userId) return;
+    let alive = true;
+    userApi.me().then(
+      (m) => alive && setAvatarUrl(m.avatarUrl ?? null),
+      () => { /* 静默 —— 头像不是关键 */ }
+    );
+    return () => { alive = false; };
+  }, [user?.userId]);
 
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
@@ -254,14 +284,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </span>
               )}
             </button>
-            <div className="text-right text-xs">
-              <div className="font-medium text-foreground">
-                {user?.username ?? "—"}
+            <button
+              type="button"
+              onClick={() => router.push("/profile")}
+              title="个人中心"
+              className="flex items-center gap-2 rounded-md border bg-background px-2 py-1 text-xs hover:bg-accent"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={avatarUrl || "/assets/defaults/avatar.png"}
+                alt={user?.username ?? "avatar"}
+                className="size-7 rounded-full object-cover ring-1 ring-border"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "/assets/defaults/avatar.png";
+                }}
+              />
+              <div className="text-left">
+                <div className="font-medium text-foreground">
+                  {user?.username ?? "—"}
+                </div>
+                <div className="text-muted-foreground">
+                  {user?.userType === "TEMP" ? "临时账号" : user?.employeeNo}
+                </div>
               </div>
-              <div className="text-muted-foreground">
-                {user?.userType === "TEMP" ? "临时账号" : user?.employeeNo}
-              </div>
-            </div>
+            </button>
             <button
               onClick={handleLogout}
               className="rounded-md border bg-background px-3 py-1.5 text-xs hover:bg-accent"
