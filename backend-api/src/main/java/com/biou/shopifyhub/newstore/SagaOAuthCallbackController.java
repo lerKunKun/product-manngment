@@ -31,6 +31,11 @@ public class SagaOAuthCallbackController {
     @Value("${shopify.oauth.saga-frontend-base:http://localhost:3000/newstore}")
     private String sagaFrontendBase;
 
+    /** 与标准 OAuth 共用的成功页（公开路由，避开 (authed) 重 hydrate 白屏）。
+     *  设为空串退化到旧行为（直接落地 sagaFrontendBase/{taskId}）。 */
+    @Value("${SHOPIFY_FRONTEND_SUCCESS_URL:http://localhost:3000/oauth/success}")
+    private String frontendSuccessUrl;
+
     public SagaOAuthCallbackController(SagaAuthService sagaAuthService) {
         this.sagaAuthService = sagaAuthService;
     }
@@ -42,7 +47,16 @@ public class SagaOAuthCallbackController {
                                          @RequestParam(required = false) String hmac) {
         try {
             Map<String, Object> r = sagaAuthService.handleCallback(code, shop, state, hmac);
-            String redirect = sagaFrontendBase + "/" + r.get("taskId");
+            // 跳成功页 3s 倒计时后再回 /newstore/{taskId}，避开 (authed) layout 重 hydrate 白屏。
+            // frontendSuccessUrl 设为空时退化到旧路径（直接落地 saga 进度页）。
+            String redirect;
+            if (frontendSuccessUrl == null || frontendSuccessUrl.isBlank()) {
+                redirect = sagaFrontendBase + "/" + r.get("taskId");
+            } else {
+                redirect = frontendSuccessUrl
+                    + "?shop=" + URLEncoder.encode(shop, StandardCharsets.UTF_8)
+                    + "&taskId=" + URLEncoder.encode(String.valueOf(r.get("taskId")), StandardCharsets.UTF_8);
+            }
             return ResponseEntity.status(302).header("Location", redirect).build();
         } catch (Exception e) {
             log.warn("[saga-oauth] callback failed shop={} err={}", shop, e.getMessage());
