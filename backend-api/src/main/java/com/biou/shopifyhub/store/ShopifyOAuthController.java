@@ -43,6 +43,7 @@ public class ShopifyOAuthController {
     private final StoreMapper storeMapper;
     private final ShopifyApiClient shopify;
     private final StringRedisTemplate redis;
+    private final StoreService storeService;
 
     @Value("${SHOPIFY_APP_KEY:}")
     private String apiKey;
@@ -71,10 +72,14 @@ public class ShopifyOAuthController {
       // V32: 店铺管理卡片需读 orders.json 拉 GMV/订单数（5 个时间窗）
       + "read_orders";
 
-    public ShopifyOAuthController(StoreMapper storeMapper, ShopifyApiClient shopify, StringRedisTemplate redis) {
+    public ShopifyOAuthController(StoreMapper storeMapper,
+                                  ShopifyApiClient shopify,
+                                  StringRedisTemplate redis,
+                                  StoreService storeService) {
         this.storeMapper = storeMapper;
         this.shopify = shopify;
         this.redis = redis;
+        this.storeService = storeService;
     }
 
     @PostMapping("/oauth/shopify/init")
@@ -146,6 +151,8 @@ public class ShopifyOAuthController {
         // store.scopes 是 MySQL JSON 列；Shopify 返回逗号分隔字符串，必须编码成 JSON 数组字面量再入库
         String scopesJson = encodeScopesJson(tok.scope());
         Store existing = storeMapper.selectOne(new QueryWrapper<Store>().eq("myshopify_domain", shop));
+        boolean isNewConnect = (existing == null);
+        Store stored;
         if (existing == null) {
             Store s = new Store();
             s.setTenantId(tenantId);
@@ -158,14 +165,20 @@ public class ShopifyOAuthController {
             s.setIsPartnerCollab(false);
             s.setStatus("ACTIVE");
             storeMapper.insert(s);
+            stored = s;
         } else {
             existing.setEncryptedAccessToken(AesGcmUtil.encrypt(tok.accessToken(), aesKey));
             if (scopesJson != null) existing.setScopes(scopesJson);
             existing.setStatus("ACTIVE");
             existing.setLastRefreshAt(java.time.LocalDateTime.now());
             storeMapper.updateById(existing);
+            stored = existing;
         }
-        log.info("[shopify-oauth] connected shop={} by user={}", shop, uid);
+        log.info("[shopify-oauth] connected shop={} by user={} new={}", shop, uid, isNewConnect);
+        // AS1-01：仅在首次接入（new connect）时触发全店静默同步，避免 token 刷新也跑一次全量。
+        if (isNewConnect) {
+            storeService.publishStoreConnected(stored, uid);
+        }
 
         // 跳到独立成功页，3s 倒计时后再回 /stores —— 避开 (authed) layout 重新走
         // /auth/refresh 时的 "正在恢复登录状态..." 白屏。frontendSuccessUrl 设为空时
