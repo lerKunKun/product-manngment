@@ -295,7 +295,53 @@ public class ShopifyApiClient {
         }
     }
 
+    /**
+     * 列出 Shopify 全部产品 id（AS1-03）。
+     *
+     * <p>实现：GET /admin/api/{ver}/products.json?fields=id&limit=250 + Link 翻页，
+     * 上限 MAX_PAGES（最多 250 * 8 = 2000 个产品）保护——MVP 全店静默同步首版只覆盖
+     * 中小店；超大店 v1.1 再接断点续传。返回 ok=false + error 给上游决定怎么处理。
+     */
+    public ProductIdsResult listProductIds(String myshopifyDomain, String accessToken) {
+        final int MAX_PAGES = 8;
+        try {
+            String url = apiBaseUrl + myshopifyDomain + "/admin/api/" + apiVersion
+                + "/products.json?fields=id&limit=250";
+            java.util.List<Long> ids = new java.util.ArrayList<>();
+            int pages = 0;
+            while (url != null && pages < MAX_PAGES) {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .header("X-Shopify-Access-Token", accessToken)
+                    .timeout(Duration.ofSeconds(15))
+                    .GET().build();
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 401 || resp.statusCode() == 403) {
+                    return new ProductIdsResult(false, ids, "token rejected HTTP " + resp.statusCode());
+                }
+                if (resp.statusCode() != 200) {
+                    return new ProductIdsResult(false, ids,
+                        "HTTP " + resp.statusCode() + ": " + snip(resp.body(), 200));
+                }
+                JsonNode arr = JSON.readTree(resp.body()).path("products");
+                if (arr.isArray()) {
+                    for (JsonNode p : arr) {
+                        long id = p.path("id").asLong(0);
+                        if (id > 0) ids.add(id);
+                    }
+                }
+                url = parseNextLink(resp.headers().firstValue("Link").orElse(null), apiBaseUrl, myshopifyDomain, apiVersion);
+                pages++;
+            }
+            return new ProductIdsResult(true, ids, null);
+        } catch (Exception e) {
+            log.warn("Shopify listProductIds error domain={} err={}", myshopifyDomain, e.getMessage());
+            return new ProductIdsResult(false, java.util.List.of(),
+                e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
     public record ShopInfo(boolean ok, String name, String error) {}
+    public record ProductIdsResult(boolean ok, java.util.List<Long> ids, String error) {}
     public record TokenExchangeResult(boolean ok, String accessToken, String scope, String error) {}
     public record ShopDetail(boolean ok, int statusCode, String name, String planName, String error) {}
     public record OrdersMetric(
