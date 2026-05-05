@@ -4,6 +4,7 @@ import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.product.entity.ProductImage;
 import com.biou.shopifyhub.product.mapper.ProductImageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -23,6 +24,7 @@ public class FileController {
 
     /** 上传产品主图 → 入 product_image 表 + 返回 URL */
     @PostMapping("/product/{productId}/image")
+    @PreAuthorize("hasAuthority('PERM_MEDIA:UPLOAD')")
     public Result<Map<String, Object>> uploadProductImage(
         @PathVariable Long productId,
         @RequestParam("file") MultipartFile file
@@ -46,6 +48,7 @@ public class FileController {
 
     /** 上传通用文档（TipTap 富文本里粘贴的图片） → 不入业务表，仅返回 URL */
     @PostMapping("/upload-doc")
+    @PreAuthorize("hasAuthority('PERM_MEDIA:UPLOAD')")
     public Result<Map<String, String>> uploadDoc(
         @RequestParam(value = "productId", required = false) Long productId,
         @RequestParam("file") MultipartFile file

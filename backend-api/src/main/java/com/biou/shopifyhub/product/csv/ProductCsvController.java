@@ -7,6 +7,7 @@ import com.biou.shopifyhub.core.exception.BusinessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -29,6 +30,7 @@ public class ProductCsvController {
     }
 
     @PostMapping("/import")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<ProductCsvService.ImportReport> importCsv(
         @RequestParam("file") MultipartFile file,
         @RequestParam("ownerCompanyId") Long ownerCompanyId,
@@ -53,6 +55,7 @@ public class ProductCsvController {
      * 走 {@link StreamingResponseBody}，避免一次性把所有产品加载到内存。
      */
     @GetMapping("/export")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public ResponseEntity<StreamingResponseBody> exportCsv(
         @RequestParam(required = false, defaultValue = "all") String mode,
         @RequestParam(required = false) String ids,

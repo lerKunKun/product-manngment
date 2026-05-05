@@ -2,6 +2,7 @@ package com.biou.shopifyhub.store;
 
 import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.store.entity.Store;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +29,7 @@ public class StorePoolController {
     }
 
     @GetMapping("/partner-collab")
+    @PreAuthorize("hasAuthority('PERM_STORE:READ')")
     public Result<List<Map<String, Object>>> listPartnerCollab(
             @RequestParam(required = false) Long tenantId,
             @RequestParam(required = false) Boolean available) {

@@ -1,6 +1,7 @@
 package com.biou.shopifyhub.push;
 
 import com.biou.shopifyhub.core.Result;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -35,6 +36,7 @@ public class PushController {
     }
 
     @PostMapping("/product")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:PUSH')")
     public Result<Map<String, Object>> push(@RequestBody PushRequest req) {
         Long taskId = pushService.push(req.productId(), req.storeId(), req.triggeredBy());
         return Result.ok(Map.of("taskId", taskId));
@@ -45,6 +47,7 @@ public class PushController {
      * to a single parent task via {@code parent_task_id} (W2-PUSH-05).
      */
     @PostMapping("/batch")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:PUSH')")
     public Result<Map<String, Object>> batch(@RequestBody BatchPushRequest req) {
         PushService.BatchResult r = pushService.pushBatch(
             req.productIds(), req.storeId(), req.triggeredBy());

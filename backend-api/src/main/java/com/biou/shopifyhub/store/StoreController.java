@@ -11,6 +11,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -42,6 +43,7 @@ public class StoreController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('PERM_STORE:READ')")
     public Result<List<Map<String, Object>>> list(
             @RequestParam(required = false) Long tenantId,
             @RequestParam(required = false) Boolean partnerCollab,
@@ -106,6 +108,7 @@ public class StoreController {
     }
 
     @PostMapping("/connect/custom-app")
+    @PreAuthorize("hasAuthority('PERM_STORE:OAUTH')")
     public Result<Map<String, Long>> connectCustomApp(@RequestBody StoreService.ConnectCustomAppReq req) {
         Long uid = CurrentUser.userIdOrNull();
         if (uid == null) uid = 1L;
@@ -115,6 +118,7 @@ public class StoreController {
 
     /** 手动触发店铺指标刷新（plan + 30d GMV/订单数）。同步调用，订单多时可能 30s+。 */
     @PostMapping("/{id}/refresh-metrics")
+    @PreAuthorize("hasAuthority('PERM_STORE:READ')")
     public Result<Map<String, Object>> refreshMetrics(@PathVariable Long id) {
         StoreMetricsService.RefreshResult r = metricsService.refreshById(id);
         return Result.ok(Map.of("storeId", id, "result", r.name()));
@@ -122,6 +126,7 @@ public class StoreController {
 
     /** 删除店铺是危险操作 */
     @RequireSensitiveOp("STORE_DELETE")
+    @PreAuthorize("hasAuthority('PERM_STORE:TOKEN_MANAGE')")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         Long uid = CurrentUser.userIdOrNull();
@@ -132,6 +137,7 @@ public class StoreController {
 
     /** W3-PV-01：把店铺打入合作者店铺池 */
     @RequireSensitiveOp("STORE_MARK_PARTNER_COLLAB")
+    @PreAuthorize("hasAuthority('PERM_STORE:TOKEN_MANAGE')")
     @PostMapping("/{id}/mark-partner-collab")
     public Result<Void> markPartnerCollab(@PathVariable Long id) {
         Long uid = CurrentUser.userIdOrNull();
@@ -142,6 +148,7 @@ public class StoreController {
 
     /** W3-PV-01：把店铺移出合作者店铺池 */
     @RequireSensitiveOp("STORE_MARK_PARTNER_COLLAB")
+    @PreAuthorize("hasAuthority('PERM_STORE:TOKEN_MANAGE')")
     @PostMapping("/{id}/unmark-partner-collab")
     public Result<Void> unmarkPartnerCollab(@PathVariable Long id) {
         Long uid = CurrentUser.userIdOrNull();
@@ -152,6 +159,7 @@ public class StoreController {
 
     /** W3-PV-01：标记店铺为 dev store（影响计费 / 试用规则） */
     @RequireSensitiveOp("STORE_MARK_DEV_STORE")
+    @PreAuthorize("hasAuthority('PERM_STORE:TOKEN_MANAGE')")
     @PostMapping("/{id}/mark-dev-store")
     public Result<Void> markDevStore(@PathVariable Long id) {
         Long uid = CurrentUser.userIdOrNull();
@@ -162,6 +170,7 @@ public class StoreController {
 
     /** T10: 禁用店铺（status=DISABLED，对齐既有枚举集 ACTIVE/DISABLED/TOKEN_EXPIRED/UNINSTALLED）。敏感操作。 */
     @RequireSensitiveOp("STORE_BATCH_DISABLE")
+    @PreAuthorize("hasAuthority('PERM_STORE:TOKEN_MANAGE')")
     @PostMapping("/{id}/disable")
     public Result<Void> disable(@PathVariable Long id) {
         Store s = service.getById(id);
@@ -176,6 +185,7 @@ public class StoreController {
      * 任何异常 → healthy=false + reason，不抛 500。
      */
     @GetMapping("/{id}/test")
+    @PreAuthorize("hasAuthority('PERM_STORE:READ')")
     public Result<Map<String, Object>> test(@PathVariable Long id) {
         Store s = service.getById(id);
         Map<String, Object> resp = new LinkedHashMap<>();

@@ -17,6 +17,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -54,6 +55,7 @@ public class AssetSnapshotController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
     public Result<Map<String, Object>> list(
         @RequestParam(defaultValue = "1") int page,
         @RequestParam(defaultValue = "20") int size,
@@ -77,6 +79,7 @@ public class AssetSnapshotController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
     public Result<Map<String, Object>> detail(@PathVariable Long id) {
         AssetSnapshot snap = snapshotMapper.selectById(id);
         Map<String, Object> resp = new LinkedHashMap<>();
@@ -114,6 +117,7 @@ public class AssetSnapshotController {
      * 前端「批量拉资产」依赖此 endpoint，但当前 worker 不会自动消费。
      */
     @PostMapping("/trigger")
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
     public Result<Long> trigger(@RequestBody TriggerReq req) {
         if (req == null || req.storeId == null) {
             throw new BusinessException(ResultCode.VALIDATION_FAILED, "storeId required");
@@ -143,6 +147,7 @@ public class AssetSnapshotController {
      * T22: 取消 PENDING/RUNNING 快照。CANCELED 已通过 V25 加入 asset_snapshot.status 枚举。
      */
     @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
     public Result<Void> cancel(@PathVariable Long id) {
         AssetSnapshot s = snapshotMapper.selectById(id);
         if (s == null) throw new BusinessException(ResultCode.NOT_FOUND, "snapshot " + id);
@@ -156,6 +161,7 @@ public class AssetSnapshotController {
     }
 
     @GetMapping("/{id}/manifest")
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
     public Result<Map<String, Object>> manifest(@PathVariable Long id) {
         AssetSnapshot snap = snapshotMapper.selectById(id);
         if (snap == null) {

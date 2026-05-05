@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -81,6 +82,7 @@ public class ProductSnapshotController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<Map<String, Object>> list(
         @RequestParam(defaultValue = "1") int page,
         @RequestParam(defaultValue = "20") int size,
@@ -104,6 +106,7 @@ public class ProductSnapshotController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<Map<String, Object>> detail(@PathVariable Long id) {
         ProductSnapshot snap = snapshotMapper.selectById(id);
         Map<String, Object> resp = new LinkedHashMap<>();
@@ -149,6 +152,7 @@ public class ProductSnapshotController {
     }
 
     @GetMapping("/{id}/manifest")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<Map<String, Object>> manifest(@PathVariable Long id) {
         ProductSnapshot snap = snapshotMapper.selectById(id);
         if (snap == null) {
@@ -169,6 +173,7 @@ public class ProductSnapshotController {
     }
 
     @GetMapping("/{id}/csv")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public ResponseEntity<byte[]> csv(@PathVariable Long id) {
         ProductSnapshot snap = snapshotMapper.selectById(id);
         if (snap == null) {
@@ -192,6 +197,7 @@ public class ProductSnapshotController {
     }
 
     @PostMapping("/manual")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<Map<String, Object>> manual(@RequestBody ManualReq req) {
         if (req == null || req.storeId == null || req.productExternalId == null || req.productExternalId.isBlank()) {
             return Result.error(400, "storeId + productExternalId required");
