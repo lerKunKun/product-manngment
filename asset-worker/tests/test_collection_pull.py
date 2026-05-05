@@ -1,4 +1,4 @@
-"""Tests for CollectionPullService orchestration."""
+"""Tests for CollectionPullService orchestration (CAS-backed, AS2)."""
 from __future__ import annotations
 
 import json
@@ -8,6 +8,12 @@ from app.services.collection_pull import CollectionPullService
 
 
 SHOP = "demo.myshopify.com"
+
+
+def _r2_with_miss():
+    r2 = MagicMock()
+    r2.head_object.return_value = False
+    return r2
 
 
 class _FakeAdmin:
@@ -37,40 +43,40 @@ def _factory_for(fake: _FakeAdmin):
     return _factory
 
 
-def test_dry_run_returns_two_collections():
+def test_dry_run_returns_three_entries():
     cli = MagicMock()
-    r2 = MagicMock()
+    r2 = _r2_with_miss()
 
     svc = CollectionPullService(shopify_cli=cli, r2_client=r2, dry_run=True)
     out = svc.pull(shop_domain=SHOP, tenant_id=1, store_id=3, snapshot_id=42)
 
     assert out["dry_run"] is True
-    assert out["file_count"] == 2
+    # 2 collections + 1 index.json
+    assert out["file_count"] == 3
     assert out["r2_prefix"] == "tenants/1/stores/3/snapshots/42/collection/"
     cli.get_token.assert_not_called()
-    # 2 collection files + 1 index.json + 1 manifest = 4 put_object calls.
+    # 2 collections + 1 index.json (CAS) + 1 manifest = 4 put_object calls
     assert r2.put_object.call_count == 4
     keys = [c.args[0] for c in r2.put_object.call_args_list]
     assert keys[-1].endswith("manifest.json")
-    assert any(k.endswith("index.json") for k in keys)
 
 
 def test_dry_run_swallows_r2_errors():
     cli = MagicMock()
-    r2 = MagicMock()
+    r2 = _r2_with_miss()
+    r2.head_object.side_effect = RuntimeError("R2 not configured")
     r2.put_object.side_effect = RuntimeError("R2 not configured")
 
     svc = CollectionPullService(shopify_cli=cli, r2_client=r2, dry_run=True)
     out = svc.pull(shop_domain=SHOP, tenant_id=1, store_id=3, snapshot_id=42)
     assert out["dry_run"] is True
-    assert out["file_count"] == 2
-    assert r2.put_object.call_count == 4
+    assert out["file_count"] == 3
 
 
 def test_real_path_combines_custom_and_smart():
     cli = MagicMock()
     cli.get_token.return_value = "shpat_test"
-    r2 = MagicMock()
+    r2 = _r2_with_miss()
 
     fake = _FakeAdmin(
         custom=[
@@ -89,36 +95,40 @@ def test_real_path_combines_custom_and_smart():
     )
     out = svc.pull(shop_domain=SHOP, tenant_id=1, store_id=3, snapshot_id=42)
 
-    # Both endpoints called once.
     assert ("get_custom_collections",) in fake.calls
     assert ("get_smart_collections",) in fake.calls
 
-    # 3 collection files + 1 index.json + 1 manifest = 5 put_object calls.
+    # 3 collections + 1 index.json (all CAS) + 1 manifest = 5 put_object calls
     assert r2.put_object.call_count == 5
     keys = [c.args[0] for c in r2.put_object.call_args_list]
     assert keys[-1].endswith("manifest.json")
-    assert any(k.endswith("custom-frontpage.json") for k in keys)
-    assert any(k.endswith("custom-sale.json") for k in keys)
-    assert any(k.endswith("smart-best-sellers.json") for k in keys)
-    assert any(k.endswith("index.json") for k in keys)
+    # Pre-manifest keys all live under tenant CAS prefix.
+    for k in keys[:-1]:
+        assert k.startswith("tenants/1/cas/")
 
     manifest = json.loads(r2.put_object.call_args_list[-1].args[1].decode("utf-8"))
-    assert manifest["kind"] == "collection"
-    assert manifest["summary"]["custom_count"] == 2
-    assert manifest["summary"]["smart_count"] == 1
-    # file_count counts every uploaded artifact incl. index.json.
-    assert manifest["summary"]["file_count"] == 4
+    paths = sorted(e["relative_path"] for e in manifest["entries"])
+    assert paths == [
+        "custom-frontpage.json",
+        "custom-sale.json",
+        "index.json",
+        "smart-best-sellers.json",
+    ]
+    # entries count includes index.json
     assert out["file_count"] == 4
 
 
-def test_each_collection_gets_separate_r2_key():
+def test_dedup_when_same_collection_repeats():
+    """Two pulls of identical collection content → second pull dedups
+    on every CAS HEAD hit (only manifest is PUT)."""
     cli = MagicMock()
     cli.get_token.return_value = "shpat_test"
     r2 = MagicMock()
+    r2.head_object.return_value = True  # CAS hit
 
     fake = _FakeAdmin(
-        custom=[{"id": 1, "handle": "alpha", "title": "Alpha"}],
-        smart=[{"id": 2, "handle": "alpha", "title": "Alpha (smart)"}],
+        custom=[{"id": 1, "handle": "frontpage", "title": "F"}],
+        smart=[],
     )
     svc = CollectionPullService(
         shopify_cli=cli,
@@ -126,14 +136,9 @@ def test_each_collection_gets_separate_r2_key():
         admin_factory=_factory_for(fake),
         dry_run=False,
     )
-    svc.pull(shop_domain=SHOP, tenant_id=1, store_id=3, snapshot_id=42)
+    out = svc.pull(shop_domain=SHOP, tenant_id=1, store_id=3, snapshot_id=42)
 
-    keys = [c.args[0] for c in r2.put_object.call_args_list]
-    # Same handle in both flavours must NOT collide (custom-/smart- prefix).
-    assert any(k.endswith("custom-alpha.json") for k in keys)
-    assert any(k.endswith("smart-alpha.json") for k in keys)
-    # Sanity: every key (excluding manifest+index) is unique.
-    body_keys = [
-        k for k in keys if not (k.endswith("manifest.json") or k.endswith("index.json"))
-    ]
-    assert len(body_keys) == len(set(body_keys))
+    # 1 collection + 1 index.json — both deduped.
+    assert out["deduped_count"] == 2
+    assert r2.put_object.call_count == 1  # only manifest
+    assert r2.put_object.call_args_list[0].args[0].endswith("manifest.json")

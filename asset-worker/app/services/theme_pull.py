@@ -1,17 +1,25 @@
 """
 Theme pull orchestration.
 
-Given a snapshot id and a Shopify shop, pulls every asset of a theme
-(main / published by default, or an explicit theme_id) and writes both
-the asset bodies and a manifest.json into R2 under a deterministic
-prefix. The worker is stateless w.r.t. the application database; the
-backend records snapshot/file rows in response to SSE events emitted in
-W2-AST-05 and is fed by the dict returned here.
+Track AS2 — content-addressable layout.
+
+Pulls every asset of a theme (main / published by default, or an
+explicit theme_id) and writes the bytes through the CAS layer
+(:mod:`app.services.cas_storage`) plus a single ``manifest.json`` per
+snapshot (:mod:`app.services.manifest_writer`).
+
+Blob storage uses ``tenants/{tid}/cas/{sha[:2]}/{sha}`` so the same
+theme file shared across stores or repeated snapshots only occupies one
+R2 slot. The manifest is the only per-snapshot artifact — it maps
+``relative_path -> sha256`` so downstream consumers can reconstruct any
+file.
+
+Pull-route response keeps every field it had before; ``deduped_count``
+is added for observability.
 """
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
 import time
 from datetime import datetime, timezone
@@ -21,8 +29,9 @@ from app.clients.shopify_admin import ShopifyAdminClient, ShopifyAdminError
 from app.services._dry_run import (
     synthetic_json_bytes as _synthetic_json_bytes,
     synthetic_text_bytes as _synthetic_text_bytes,
-    try_put_object as _try_put_object_shared,
 )
+from app.services.cas_storage import put_or_link
+from app.services.manifest_writer import ManifestEntry, write_manifest
 from app.services.progress import ProgressEmitter
 
 logger = logging.getLogger(__name__)
@@ -53,8 +62,47 @@ def _guess_content_type(asset: dict, key: str) -> str:
     return "application/octet-stream"
 
 
+def _safe_put_or_link(
+    r2_client: Any, tenant_id: int, body: bytes, content_type: Optional[str]
+) -> dict:
+    """``put_or_link`` that swallows R2 errors (used by dry-run paths)."""
+    try:
+        return put_or_link(r2_client, tenant_id, body, content_type)
+    except Exception as exc:  # noqa: BLE001
+        import hashlib
+
+        sha = hashlib.sha256(body).hexdigest()
+        logger.warning(
+            "dry-run CAS upload failed (continuing in-memory only): err=%s",
+            exc,
+        )
+        return {
+            "sha256": sha,
+            "size": len(body),
+            "cas_key": f"tenants/{tenant_id}/cas/{sha[:2]}/{sha}",
+            "deduped": False,
+            "content_type": content_type,
+        }
+
+
+def _safe_write_manifest(
+    r2_client: Any, prefix: str, entries: list[ManifestEntry]
+) -> str:
+    """``write_manifest`` that swallows R2 errors (used by dry-run paths)."""
+    try:
+        return write_manifest(r2_client, prefix, entries)
+    except Exception as exc:  # noqa: BLE001
+        manifest_key = prefix.rstrip("/") + "/manifest.json"
+        logger.warning(
+            "dry-run manifest upload failed (swallowed): key=%s err=%s",
+            manifest_key,
+            exc,
+        )
+        return manifest_key
+
+
 class ThemePullService:
-    """Orchestrates token + Shopify Admin + R2 to materialize a theme snapshot."""
+    """Orchestrates token + Shopify Admin + CAS R2 to materialize a theme snapshot."""
 
     def __init__(
         self,
@@ -124,36 +172,25 @@ class ThemePullService:
         theme_id: Optional[int],
     ) -> dict:
         prefix = _r2_prefix(tenant_id, store_id, snapshot_id)
-        manifest_key = f"{prefix}manifest.json"
         started_at = _now_iso()
         clock_start = time.perf_counter()
 
         token = self.shopify_cli.get_token(shop_domain)
         admin = self.admin_factory(shop_domain, token)
 
-        # 1. resolve theme
-        chosen_theme: dict
+        # 1. resolve theme — choose ``main`` when caller didn't pin one.
         if theme_id is None:
             themes = admin.get_themes()
             chosen_theme = self._pick_main_theme(themes)
             theme_id = int(chosen_theme["id"])
-        else:
-            # Best-effort lookup for naming; tolerate absence.
-            try:
-                themes = admin.get_themes()
-                chosen_theme = next(
-                    (t for t in themes if int(t.get("id", -1)) == int(theme_id)),
-                    {"id": theme_id, "name": "", "role": ""},
-                )
-            except ShopifyAdminError:
-                chosen_theme = {"id": theme_id, "name": "", "role": ""}
 
         # 2. enumerate assets
         assets_meta = admin.get_assets(theme_id)
 
-        # 3. for each, fetch full body, compute sha256, upload to R2
-        manifest_files: list[dict] = []
+        # 3. for each, fetch full body, push to CAS, append manifest entry.
+        entries: list[ManifestEntry] = []
         total_bytes = 0
+        deduped_count = 0
         total = max(len(assets_meta), 1)
         for idx, meta in enumerate(assets_meta):
             key = meta.get("key")
@@ -162,49 +199,32 @@ class ThemePullService:
             full = admin.get_asset(theme_id, key)
             body = self._asset_to_bytes(full)
             content_type = _guess_content_type(full, key)
-            sha256 = hashlib.sha256(body).hexdigest()
-            r2_key = f"{prefix}{key}"
-            self.r2_client.put_object(r2_key, body, content_type=content_type)
-            manifest_files.append(
+            cas = put_or_link(self.r2_client, tenant_id, body, content_type)
+            if cas["deduped"]:
+                deduped_count += 1
+            entries.append(
                 {
-                    "path": key,
-                    "r2_key": r2_key,
-                    "size": len(body),
+                    "relative_path": key,
+                    "sha256": cas["sha256"],
+                    "size": cas["size"],
                     "content_type": content_type,
-                    "sha256": sha256,
+                    "source_url": None,
                 }
             )
-            total_bytes += len(body)
+            total_bytes += cas["size"]
             self._emit("file", progress=(idx + 1) / total, message=key)
 
-        # 4. manifest last
-        manifest = {
-            "snapshot_id": snapshot_id,
-            "shop_domain": shop_domain,
-            "theme_id": theme_id,
-            "theme_name": chosen_theme.get("name", ""),
-            "theme_role": chosen_theme.get("role", ""),
-            "files": manifest_files,
-            "summary": {
-                "file_count": len(manifest_files),
-                "total_bytes": total_bytes,
-            },
-        }
-        import json as _json
-
-        manifest_bytes = _json.dumps(manifest, ensure_ascii=False).encode("utf-8")
         self._emit("manifest_writing", progress=0.99, message="manifest.json")
-        self.r2_client.put_object(
-            manifest_key, manifest_bytes, content_type="application/json"
-        )
+        manifest_key = write_manifest(self.r2_client, prefix, entries)
 
         completed_at = _now_iso()
         elapsed = round(time.perf_counter() - clock_start, 3)
         logger.info(
-            "theme pull done shop=%s snapshot=%s files=%d bytes=%d elapsed=%ss",
+            "theme pull done shop=%s snapshot=%s files=%d deduped=%d bytes=%d elapsed=%ss",
             shop_domain,
             snapshot_id,
-            len(manifest_files),
+            len(entries),
+            deduped_count,
             total_bytes,
             elapsed,
         )
@@ -213,8 +233,9 @@ class ThemePullService:
             "snapshot_id": snapshot_id,
             "r2_prefix": prefix,
             "manifest_key": manifest_key,
-            "file_count": len(manifest_files),
+            "file_count": len(entries),
             "total_bytes": total_bytes,
+            "deduped_count": deduped_count,
             "started_at": started_at,
             "completed_at": completed_at,
         }
@@ -228,12 +249,8 @@ class ThemePullService:
         theme_id: Optional[int],
     ) -> dict:
         prefix = _r2_prefix(tenant_id, store_id, snapshot_id)
-        manifest_key = f"{prefix}manifest.json"
         started_at = _now_iso()
 
-        # Synthetic theme files. In dry-run we still upload to R2 (best-effort)
-        # so downstream consumers (e.g. backend SnapshotGenerationService) can
-        # actually fetch the bytes when wired against MinIO/R2 in dev.
         synthetic = [
             (
                 "templates/index.json",
@@ -252,58 +269,44 @@ class ThemePullService:
             ),
         ]
 
-        files: list[dict] = []
+        entries: list[ManifestEntry] = []
         total_bytes = 0
+        deduped_count = 0
         total = max(len(synthetic) + 1, 1)
         for idx, (path, body, content_type) in enumerate(synthetic):
-            r2_key = f"{prefix}{path}"
-            _try_put_object_shared(self.r2_client, r2_key, body, content_type)
-            files.append(
+            cas = _safe_put_or_link(self.r2_client, tenant_id, body, content_type)
+            if cas["deduped"]:
+                deduped_count += 1
+            entries.append(
                 {
-                    "path": path,
-                    "r2_key": r2_key,
-                    "size": len(body),
+                    "relative_path": path,
+                    "sha256": cas["sha256"],
+                    "size": cas["size"],
                     "content_type": content_type,
-                    "sha256": hashlib.sha256(body).hexdigest(),
+                    "source_url": None,
                 }
             )
-            total_bytes += len(body)
+            total_bytes += cas["size"]
             self._emit("file", progress=(idx + 1) / total, message=path)
 
-        manifest = {
-            "snapshot_id": snapshot_id,
-            "shop_domain": shop_domain,
-            "theme_id": theme_id if theme_id is not None else 0,
-            "theme_name": "dry-run-theme",
-            "theme_role": "main",
-            "files": files,
-            "summary": {
-                "file_count": len(files),
-                "total_bytes": total_bytes,
-            },
-            "dry_run": True,
-        }
-        import json as _json
-
-        manifest_bytes = _json.dumps(manifest, ensure_ascii=False).encode("utf-8")
         self._emit("manifest_writing", progress=0.99, message="manifest.json")
-        _try_put_object_shared(
-            self.r2_client, manifest_key, manifest_bytes, "application/json"
-        )
+        manifest_key = _safe_write_manifest(self.r2_client, prefix, entries)
 
         completed_at = _now_iso()
         logger.info(
-            "theme pull DRY-RUN shop=%s snapshot=%s synthetic_files=%d",
+            "theme pull DRY-RUN shop=%s snapshot=%s synthetic_files=%d deduped=%d",
             shop_domain,
             snapshot_id,
-            len(files),
+            len(entries),
+            deduped_count,
         )
         return {
             "snapshot_id": snapshot_id,
             "r2_prefix": prefix,
             "manifest_key": manifest_key,
-            "file_count": len(files),
+            "file_count": len(entries),
             "total_bytes": total_bytes,
+            "deduped_count": deduped_count,
             "started_at": started_at,
             "completed_at": completed_at,
             "dry_run": True,
@@ -317,7 +320,6 @@ class ThemePullService:
             if theme.get("role") == "main":
                 return theme
         if themes:
-            # Fall back to first if nothing flagged main (extremely rare on live shops).
             return themes[0]
         raise ShopifyAdminError("shop has no themes")
 
@@ -329,5 +331,4 @@ class ThemePullService:
         value = asset.get("value")
         if isinstance(value, str):
             return value.encode("utf-8")
-        # Empty asset (e.g. checksum-only); represent as empty bytes.
         return b""

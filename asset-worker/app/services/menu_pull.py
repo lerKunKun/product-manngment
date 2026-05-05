@@ -1,13 +1,13 @@
 """
-Menu pull orchestration.
+Menu pull orchestration (CAS-backed, Track AS2).
 
 Mirrors :mod:`app.services.theme_pull` for storefront navigation menus.
 Menus are fetched via the GraphQL Admin API (REST has no menus endpoint
-in modern API versions) and persisted as one JSON document per menu.
+in modern API versions) and persisted as one JSON document per menu
+through the CAS layer.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
@@ -15,8 +15,10 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from app.clients.shopify_admin import ShopifyAdminClient
-from app.services._dry_run import try_put_object as _try_put_object
+from app.services.cas_storage import put_or_link
+from app.services.manifest_writer import ManifestEntry, write_manifest
 from app.services.progress import ProgressEmitter
+from app.services.theme_pull import _safe_put_or_link, _safe_write_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,7 @@ def _now_iso() -> str:
 
 
 class MenuPullService:
-    """Orchestrates shopify-cli + Admin GraphQL + R2 for navigation menus."""
+    """Orchestrates shopify-cli + Admin GraphQL + CAS R2 for navigation menus."""
 
     def __init__(
         self,
@@ -84,7 +86,6 @@ class MenuPullService:
         snapshot_id: int,
     ) -> dict:
         prefix = _r2_prefix(tenant_id, store_id, snapshot_id)
-        manifest_key = f"{prefix}manifest.json"
         started_at = _now_iso()
         clock_start = time.perf_counter()
 
@@ -92,48 +93,41 @@ class MenuPullService:
         admin = self.admin_factory(shop_domain, token)
         menus = admin.get_menus()
 
-        files: list[dict] = []
+        entries: list[ManifestEntry] = []
         total_bytes = 0
+        deduped_count = 0
         total = max(len(menus), 1)
         for idx, menu in enumerate(menus):
             handle = menu.get("handle") or f"menu-{menu.get('id', 'unknown')}"
+            relative_path = f"{handle}.json"
             body = json.dumps(menu, ensure_ascii=False, indent=2).encode("utf-8")
-            r2_key = f"{prefix}{handle}.json"
-            self.r2_client.put_object(r2_key, body, content_type="application/json")
-            files.append(
+            cas = put_or_link(self.r2_client, tenant_id, body, "application/json")
+            if cas["deduped"]:
+                deduped_count += 1
+            entries.append(
                 {
-                    "path": f"{handle}.json",
-                    "r2_key": r2_key,
-                    "handle": handle,
-                    "title": menu.get("title", ""),
-                    "item_count": len(menu.get("items") or []),
-                    "size": len(body),
+                    "relative_path": relative_path,
+                    "sha256": cas["sha256"],
+                    "size": cas["size"],
                     "content_type": "application/json",
-                    "sha256": hashlib.sha256(body).hexdigest(),
+                    "source_url": None,
                 }
             )
-            total_bytes += len(body)
-            self._emit("file", progress=(idx + 1) / total, message=f"{handle}.json")
+            total_bytes += cas["size"]
+            self._emit(
+                "file", progress=(idx + 1) / total, message=relative_path
+            )
 
-        manifest = {
-            "snapshot_id": snapshot_id,
-            "shop_domain": shop_domain,
-            "kind": "menu",
-            "files": files,
-            "summary": {"file_count": len(files), "total_bytes": total_bytes},
-        }
-        manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
         self._emit("manifest_writing", progress=0.99, message="manifest.json")
-        self.r2_client.put_object(
-            manifest_key, manifest_bytes, content_type="application/json"
-        )
+        manifest_key = write_manifest(self.r2_client, prefix, entries)
 
         elapsed = round(time.perf_counter() - clock_start, 3)
         logger.info(
-            "menu pull done shop=%s snapshot=%s files=%d bytes=%d elapsed=%ss",
+            "menu pull done shop=%s snapshot=%s files=%d deduped=%d bytes=%d elapsed=%ss",
             shop_domain,
             snapshot_id,
-            len(files),
+            len(entries),
+            deduped_count,
             total_bytes,
             elapsed,
         )
@@ -141,8 +135,9 @@ class MenuPullService:
             "snapshot_id": snapshot_id,
             "r2_prefix": prefix,
             "manifest_key": manifest_key,
-            "file_count": len(files),
+            "file_count": len(entries),
             "total_bytes": total_bytes,
+            "deduped_count": deduped_count,
             "started_at": started_at,
             "completed_at": _now_iso(),
         }
@@ -155,7 +150,6 @@ class MenuPullService:
         snapshot_id: int,
     ) -> dict:
         prefix = _r2_prefix(tenant_id, store_id, snapshot_id)
-        manifest_key = f"{prefix}manifest.json"
         started_at = _now_iso()
 
         fake_menu = {
@@ -181,46 +175,35 @@ class MenuPullService:
             ],
         }
         body = json.dumps(fake_menu, ensure_ascii=False, indent=2).encode("utf-8")
-        r2_key = f"{prefix}main-menu.json"
-        _try_put_object(self.r2_client, r2_key, body, "application/json")
-        files = [
+        cas = _safe_put_or_link(
+            self.r2_client, tenant_id, body, "application/json"
+        )
+        deduped_count = 1 if cas["deduped"] else 0
+        entries: list[ManifestEntry] = [
             {
-                "path": "main-menu.json",
-                "r2_key": r2_key,
-                "handle": "main-menu",
-                "title": "Main menu",
-                "item_count": 3,
-                "size": len(body),
+                "relative_path": "main-menu.json",
+                "sha256": cas["sha256"],
+                "size": cas["size"],
                 "content_type": "application/json",
-                "sha256": hashlib.sha256(body).hexdigest(),
+                "source_url": None,
             }
         ]
 
-        manifest = {
-            "snapshot_id": snapshot_id,
-            "shop_domain": shop_domain,
-            "kind": "menu",
-            "files": files,
-            "summary": {"file_count": len(files), "total_bytes": len(body)},
-            "dry_run": True,
-        }
-        manifest_bytes = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
-        _try_put_object(
-            self.r2_client, manifest_key, manifest_bytes, "application/json"
-        )
+        manifest_key = _safe_write_manifest(self.r2_client, prefix, entries)
 
         logger.info(
             "menu pull DRY-RUN shop=%s snapshot=%s synthetic=%d",
             shop_domain,
             snapshot_id,
-            len(files),
+            len(entries),
         )
         return {
             "snapshot_id": snapshot_id,
             "r2_prefix": prefix,
             "manifest_key": manifest_key,
-            "file_count": len(files),
-            "total_bytes": len(body),
+            "file_count": len(entries),
+            "total_bytes": cas["size"],
+            "deduped_count": deduped_count,
             "started_at": started_at,
             "completed_at": _now_iso(),
             "dry_run": True,
