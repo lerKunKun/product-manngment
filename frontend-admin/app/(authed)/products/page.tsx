@@ -8,6 +8,7 @@ import { useProducts, useInvalidateProducts } from "@/lib/queries/products";
 import { useToast } from "@/components/ui/Toast";
 import { ErrorBanner, LoadingBlock, EmptyState } from "@/components/ui/StatusBlocks";
 import { useI18n } from "@/lib/i18n/context";
+import { BatchPushTriggerDialog } from "@/components/push/BatchPushTriggerDialog";
 
 // Shared grid template — keep header & rows aligned.
 // 列：[checkbox 40] [主图 96] [产品名+ID 1fr] [价格 140] [Badge 160]
@@ -32,6 +33,7 @@ export default function ProductsPage() {
   // F3 子轨道：导出 loading 态（all / selected 各一份，互不阻塞）
   const [exportingAll, setExportingAll] = useState(false);
   const [exportingSelected, setExportingSelected] = useState(false);
+  const [batchPushOpen, setBatchPushOpen] = useState(false);
   const toast = useToast();
 
   const { data, isPending, error, refetch } = useProducts({
@@ -250,7 +252,12 @@ export default function ProductsPage() {
         <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-md border-2 border-primary bg-primary/5 px-4 py-2 text-sm">
           <span className="font-medium">{t("products.selected").replace("{count}", String(selected.size))}</span>
           <span className="flex-1" />
-          <button onClick={() => batchStatus("active")} className="rounded border px-3 py-1 hover:bg-accent">{t("products.batch.active")}</button>
+          <button
+            onClick={() => setBatchPushOpen(true)}
+            className="rounded border border-primary bg-primary px-3 py-1 text-primary-foreground hover:opacity-90"
+          >
+            {t("products.batch.push")}
+          </button>
           <button onClick={() => batchStatus("draft")} className="rounded border px-3 py-1 hover:bg-accent">{t("products.batch.draft")}</button>
           <button onClick={() => batchStatus("archived")} className="rounded border px-3 py-1 hover:bg-accent">{t("products.batch.archived")}</button>
           {/* F3 子轨道：导出选中（最多 1000 条，后端会校验） */}
@@ -350,6 +357,13 @@ export default function ProductsPage() {
           })}
         </div>
       )}
+
+      <BatchPushTriggerDialog
+        open={batchPushOpen}
+        onClose={() => setBatchPushOpen(false)}
+        productIds={Array.from(selected)}
+        onSubmitted={() => setSelected(new Set())}
+      />
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <span>{t("common.total").replace("{count}", String(total))}</span>
