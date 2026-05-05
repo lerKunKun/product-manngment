@@ -52,14 +52,16 @@ export function MediaSection({
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollStartAt = useRef<number>(0);
 
-  // 父组件 reload 时同步 order
-  if (
-    order.length !== images.length ||
-    (images.length > 0 && order[0]?.id !== images[0]?.id) ||
-    (images.length > 0 && order[order.length - 1]?.id !== images[images.length - 1]?.id)
-  ) {
+  // 父组件 reload 时同步 order：仅当 ID 列表真正变了才覆盖。
+  // 不能在 render 期间用首/尾 id 比较然后 setOrder——拖动首图或尾图的 onDragOver 会
+  // 立刻让 order[0]/order[last] 对不上 images[0]/images[last]，下一次 render 直接被
+  // 抢回，首尾图就永远拖不动。
+  const imagesKey = useMemo(() => images.map((i) => i.id).join(","), [images]);
+  useEffect(() => {
     setOrder(images);
-  }
+    // images 引用变但 imagesKey 没变（同一组 id 同序）时不需要 reset。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imagesKey]);
 
   // 已有 tags 集合（自动补全 suggest）
   const allTags = useMemo(() => {

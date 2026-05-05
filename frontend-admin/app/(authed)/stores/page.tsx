@@ -3,7 +3,7 @@
 // TODO i18n: 卡片版重写后中文 hardcoded；后续抽到 messages.ts
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   storeApi,
   type StoreItem,
@@ -69,7 +69,7 @@ function planLabel(s: StoreItem): string {
   return "Shopify";
 }
 
-/** token 剩余天数：null=未配置；负数=已过期 */
+/** token 剩余天数：null=无过期时间（OAuth offline / custom_app 永久）；负数=已过期 */
 function tokenDaysLeft(expiresAt?: string): number | null {
   if (!expiresAt) return null;
   const t = new Date(expiresAt).getTime();
@@ -77,14 +77,24 @@ function tokenDaysLeft(expiresAt?: string): number | null {
   return Math.ceil((t - Date.now()) / 86_400_000);
 }
 
-function tokenBadgeClass(days: number | null): string {
-  if (days == null) return "bg-muted/40 text-muted-foreground border";
+/** OAuth offline scope 和 custom_app token 都不带 expiresAt，但确实"已配置"——
+ *  不能直接显示"未配置 token"误导用户。仅当 tokenType 也缺失才算真未配置。 */
+function tokenBadgeClass(days: number | null, tokenType?: StoreItem["tokenType"]): string {
+  if (days == null) {
+    if (!tokenType) return "bg-muted/40 text-muted-foreground border";
+    return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400";
+  }
   if (days < 0) return "bg-rose-100 text-rose-700 border-rose-300 dark:bg-rose-500/15 dark:text-rose-400";
   if (days < 30) return "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/15 dark:text-amber-400";
   return "bg-muted/40 text-muted-foreground border";
 }
-function tokenBadgeText(days: number | null): string {
-  if (days == null) return "未配置 token";
+function tokenBadgeText(days: number | null, tokenType?: StoreItem["tokenType"]): string {
+  if (days == null) {
+    if (tokenType === "oauth") return "OAuth 已授权";
+    if (tokenType === "custom_app") return "永久 token";
+    if (tokenType === "cli") return "CLI token";
+    return "未配置 token";
+  }
   if (days < 0) return "token 已过期";
   return `${days} 天 token`;
 }
@@ -124,6 +134,7 @@ const SENSITIVE_PARTNER = "STORE_MARK_PARTNER_COLLAB";
 export default function StoresPage() {
   const toast = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data, isPending, error } = useStores();
   const invalidate = useInvalidateStores();
   const stores: StoreItem[] = data ?? [];
@@ -140,6 +151,23 @@ export default function StoresPage() {
 
   const [healthChecking, setHealthChecking] = useState<Record<number, boolean>>({});
   const [refreshing, setRefreshing] = useState<Record<number, boolean>>({});
+
+  /** OAuth 回调落地：后端 ShopifyOAuthController 302 到 /stores?connected=xxx 或 ?error=xxx，
+   *  在这里读 query → 弹 3s toast → invalidate 列表 → 清 URL，避免空白无反馈。 */
+  useEffect(() => {
+    const connected = searchParams.get("connected");
+    const oauthError = searchParams.get("error");
+    if (!connected && !oauthError) return;
+    if (connected) {
+      toast.success(`店铺 ${connected} 授权成功`, 3000);
+      invalidate();
+    } else if (oauthError) {
+      toast.error(`授权失败：${oauthError}`, 5000);
+    }
+    router.replace("/stores");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   /** 5 个时间窗 tab 当前选中（产品级一次切换不影响数据，只切显示） */
   const [period, setPeriod] = useState<MetricsPeriod>("month");
   /** mount 自动批量刷新一次（避免每次切回页面都刷）；用 ref 防 strict mode 双触发 */
@@ -396,11 +424,11 @@ export default function StoresPage() {
                   <span
                     className={
                       "inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] " +
-                      tokenBadgeClass(days)
+                      tokenBadgeClass(days, s.tokenType)
                     }
                   >
                     <span aria-hidden>⏱</span>
-                    {tokenBadgeText(days)}
+                    {tokenBadgeText(days, s.tokenType)}
                   </span>
                   <div className="flex items-center gap-1">
                     {/* 独立刷新按钮 */}
