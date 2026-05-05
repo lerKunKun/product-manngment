@@ -152,18 +152,12 @@ export default function StoresPage() {
   const [healthChecking, setHealthChecking] = useState<Record<number, boolean>>({});
   const [refreshing, setRefreshing] = useState<Record<number, boolean>>({});
 
-  /** OAuth 回调落地：后端 ShopifyOAuthController 302 到 /stores?connected=xxx 或 ?error=xxx，
-   *  在这里读 query → 弹 3s toast → invalidate 列表 → 清 URL，避免空白无反馈。 */
+  /** OAuth 错误落地：后端在 hmac/state/换 token 等失败时 302 到 /stores?error=xxx
+   *  （成功路径走独立的 /oauth/success 页面，不再走这里）。读 query → 弹错误 toast → 清 URL。 */
   useEffect(() => {
-    const connected = searchParams.get("connected");
     const oauthError = searchParams.get("error");
-    if (!connected && !oauthError) return;
-    if (connected) {
-      toast.success(`店铺 ${connected} 授权成功`, 3000);
-      invalidate();
-    } else if (oauthError) {
-      toast.error(`授权失败：${oauthError}`, 5000);
-    }
+    if (!oauthError) return;
+    toast.error(`授权失败：${oauthError}`, 5000);
     router.replace("/stores");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);

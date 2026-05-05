@@ -56,6 +56,11 @@ public class ShopifyOAuthController {
     @Value("${SHOPIFY_FRONTEND_REDIRECT:http://localhost:3000/stores}")
     private String frontendRedirect;
 
+    /** 授权成功专用页（公开路由，不被 (authed) layout 的 auth-boot 卡白屏）。
+     *  默认走 /oauth/success；env 里改成空串可以退化到旧行为（直接落地 frontendRedirect）。 */
+    @Value("${SHOPIFY_FRONTEND_SUCCESS_URL:http://localhost:3000/oauth/success}")
+    private String frontendSuccessUrl;
+
     @Value("${ENCRYPT_KEY_AES_GCM:}")
     private String aesKey;
 
@@ -162,7 +167,13 @@ public class ShopifyOAuthController {
         }
         log.info("[shopify-oauth] connected shop={} by user={}", shop, uid);
 
-        response.sendRedirect(frontendRedirect + "?connected=" + enc(shop));
+        // 跳到独立成功页，3s 倒计时后再回 /stores —— 避开 (authed) layout 重新走
+        // /auth/refresh 时的 "正在恢复登录状态..." 白屏。frontendSuccessUrl 设为空时
+        // 退化到旧行为（直接 ?connected= 落地 /stores）。
+        String successTarget = (frontendSuccessUrl == null || frontendSuccessUrl.isBlank())
+            ? frontendRedirect + "?connected=" + enc(shop)
+            : frontendSuccessUrl + "?shop=" + enc(shop);
+        response.sendRedirect(successTarget);
     }
 
     private void ensureConfigured() {
