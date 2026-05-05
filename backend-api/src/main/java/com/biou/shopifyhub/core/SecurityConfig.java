@@ -77,6 +77,40 @@ public class SecurityConfig {
                 .requestMatchers("/oauth/**", "/webhook/**", "/internal/asset/**").permitAll()
                 .requestMatchers("/internal/**").permitAll()
                 .requestMatchers("/ops/backup/**").permitAll()
+
+                // ========== RBAC Phase 2 — URL 粗拦 ==========
+                // 命名约定：authority = "PERM_<CODE>"（见 UserRolePermissionService.PERM_PREFIX）
+                // 顺序：具体 pattern 先匹配，/admin/** 兜底放最后。
+                // 细粒度的 endpoint 级（哪个方法该用哪个 perm）走 Phase 3 controller 上的 @PreAuthorize。
+
+                // /admin/users —— GET 用 USER:READ；非 GET 用 USER:MANAGE
+                .requestMatchers(HttpMethod.GET, "/admin/users/**")
+                    .hasAnyAuthority("PERM_USER:READ", "PERM_USER:MANAGE")
+                .requestMatchers("/admin/users/**").hasAuthority("PERM_USER:MANAGE")
+
+                // /admin/role —— GET 用 ROLE:READ；非 GET 用 ROLE:MANAGE
+                .requestMatchers(HttpMethod.GET, "/admin/role/**")
+                    .hasAnyAuthority("PERM_ROLE:READ", "PERM_ROLE:MANAGE")
+                .requestMatchers("/admin/role/**").hasAuthority("PERM_ROLE:MANAGE")
+
+                // /admin/audit-log + /admin/audit-archive (OpsAdminController) —— AUDIT:READ
+                .requestMatchers("/admin/audit-log/**", "/admin/audit-archive/**")
+                    .hasAuthority("PERM_AUDIT:READ")
+
+                // /admin/tenant/** (TenantDataSource[Admin]Controller) —— 平台级配置
+                .requestMatchers("/admin/tenant/**").hasAuthority("PERM_PLATFORM:TENANT_MANAGE")
+
+                // /admin/notification-log —— 通知订阅 / 投递日志，NOTIFICATION:MANAGE
+                .requestMatchers("/admin/notification-log/**").hasAuthority("PERM_NOTIFICATION:MANAGE")
+
+                // /admin/ops/** (OpsAdminController.backup-status 等) —— OPS:READ
+                .requestMatchers("/admin/ops/**").hasAuthority("PERM_OPS:READ")
+
+                // /admin/** 兜底：未在上面具体列出的 admin 路径，至少要 USER:READ（即 admin-tier 角色：
+                // PLATFORM_SUPER / COMPANY_ADMIN / DEPT_LEAD）。普通员工 (EMPLOYEE / OPERATION / 等)
+                // 没 USER:READ → /admin/** 一律 403。
+                .requestMatchers("/admin/**").hasAnyAuthority("PERM_USER:READ", "PERM_USER:MANAGE")
+
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
