@@ -133,6 +133,31 @@ class R2Client:
         )
         return body_bytes, content_type
 
+    def head_object(self, key: str) -> bool:
+        """Return True iff an object exists at ``bucket/key``.
+
+        Used by the CAS dedup layer (:mod:`app.services.cas_storage`):
+        a hit lets the caller skip the PUT. Any error short of a clean
+        200 returns ``False`` so the caller falls through to PUT, which
+        is idempotent on byte-identical content.
+        """
+        try:
+            self._ensure_configured()
+            client = self._get_client()
+            client.head_object(Bucket=self.bucket, Key=key)
+            return True
+        except ClientError as exc:
+            code = ""
+            if exc.response is not None:
+                code = exc.response.get("Error", {}).get("Code", "")
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            logger.debug("r2 head_object key=%s client-error=%s", key, code)
+            return False
+        except (BotoCoreError, RuntimeError) as exc:
+            logger.debug("r2 head_object key=%s err=%s", key, exc)
+            return False
+
     def head_bucket(self) -> bool:
         """Return True if the bucket exists & is reachable; False otherwise.
 
