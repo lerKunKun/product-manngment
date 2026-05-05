@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.validation.BindException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -103,6 +105,19 @@ public class GlobalExceptionHandler {
         log.warn("MaxUploadSize: max={} bytes msg={}", maxBytes, e.getMessage());
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
             .body(Result.error(ResultCode.VALIDATION_FAILED, hint));
+    }
+
+    /**
+     * 方法级 @PreAuthorize 拒绝时 Spring Security 6 抛 AuthorizationDeniedException（继承
+     * AccessDeniedException）。RestAuthEntryPoint 只捕过 SecurityFilterChain 的 AccessDenied
+     * （URL pattern 拦截路径），方法级抛的会冒到 MVC 异常链 → 之前 fallback 成 500。
+     * 这里显式把它转成 403 + code 10002，跟 URL 级拒绝行为一致，前端 client.ts 才能识别。
+     */
+    @ExceptionHandler({AccessDeniedException.class, AuthorizationDeniedException.class})
+    public ResponseEntity<Result<Void>> accessDenied(Exception e) {
+        log.warn("AccessDenied: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(Result.error(ResultCode.FORBIDDEN, ""));
     }
 
     @ExceptionHandler(Exception.class)
