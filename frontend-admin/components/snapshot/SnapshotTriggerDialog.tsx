@@ -1,18 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
 import { Spinner } from "@/components/ui/StatusBlocks";
 import { storeApi, type StoreItem } from "@/lib/api/store";
 import { productSnapshotApi } from "@/lib/api/snapshot";
+import {
+  storeProductApi,
+  type StoreProductMapping,
+} from "@/lib/api/storeProduct";
 
 /**
  * 立即触发产品快照（替换原 prompt() UI）。
  * - 店铺通过下拉选择，避免手输 storeId。
- * - 产品 external_id 暂时手填；TODO 后续从 store_product 映射回填。
- * - tenantId 取自所选店铺（storeApi.list() 已按 JWT 过滤当前租户）；
- *   若后端响应未带 tenantId，回退到 1，与历史 prompt 行为一致。
+ * - 产品 external_id 优先从 store_product 映射自动回填（push 后已建立映射的店铺）；
+ *   未映射的店铺允许手填（首次拉取/纯 Shopify 端建产品的兼容路径）。
+ * - 提交时同时把本平台 product.id 透传给后端，免去后端反查 store_product 失败
+ *   导致的 product_snapshot.product_id 入库 NULL。
  */
 export function SnapshotTriggerDialog({
   open,
@@ -27,28 +32,56 @@ export function SnapshotTriggerDialog({
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [storeId, setStoreId] = useState<number | "">("");
   const [externalId, setExternalId] = useState<string>("");
+  const [externalIdManual, setExternalIdManual] = useState(false);
+  const [mappings, setMappings] = useState<StoreProductMapping[]>([]);
   const [loadingStores, setLoadingStores] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // 一次性拉取本产品的所有 store_product 映射（push 过的店铺会有 shopify_product_id）
   useEffect(() => {
     if (!open) return;
     setLoadingStores(true);
-    storeApi
-      .list()
-      .then((s) => setStores(s ?? []))
-      .catch(() => {
-        /* 全局 toast 已上报 */
+    Promise.all([
+      storeApi.list().catch(() => [] as StoreItem[]),
+      storeProductApi.listForProduct(product.id).catch(() => [] as StoreProductMapping[]),
+    ])
+      .then(([s, m]) => {
+        setStores(s ?? []);
+        setMappings(m ?? []);
       })
       .finally(() => setLoadingStores(false));
-  }, [open]);
+  }, [open, product.id]);
 
   // 关闭时清空一次性输入，避免下次打开还残留上次的值。
   useEffect(() => {
     if (!open) {
       setStoreId("");
       setExternalId("");
+      setExternalIdManual(false);
+      setMappings([]);
     }
   }, [open]);
+
+  // 选店铺时：从 mappings 自动回填 externalId（如果该店铺已 push 过本产品）
+  const mappingForStore = useMemo(
+    () => (storeId ? mappings.find((m) => m.storeId === storeId) : undefined),
+    [storeId, mappings]
+  );
+  useEffect(() => {
+    if (!storeId) {
+      setExternalId("");
+      setExternalIdManual(false);
+      return;
+    }
+    if (mappingForStore?.shopifyProductId) {
+      setExternalId(mappingForStore.shopifyProductId);
+      setExternalIdManual(false);
+    } else {
+      // 没映射 → 用户手填
+      setExternalId("");
+      setExternalIdManual(true);
+    }
+  }, [storeId, mappingForStore]);
 
   async function submit() {
     if (!storeId) {
@@ -69,7 +102,13 @@ export function SnapshotTriggerDialog({
     const tenantId = store.tenantId ?? 1;
     setSubmitting(true);
     try {
-      const r = await productSnapshotApi.manual(Number(storeId), trimmed, tenantId);
+      // 第 4 个参数 product.id 是关键：让后端 product_snapshot.product_id 直接落本平台 id
+      const r = await productSnapshotApi.manual(
+        Number(storeId),
+        trimmed,
+        tenantId,
+        product.id
+      );
       if (r.queued) {
         toast.success(`快照已入队 (snapshotId=${r.snapshotId})`);
       } else {
@@ -142,12 +181,26 @@ export function SnapshotTriggerDialog({
         </label>
         <input
           value={externalId}
-          onChange={(e) => setExternalId(e.target.value)}
-          placeholder="例如 9876543210 或 gid://shopify/Product/..."
-          className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs"
+          onChange={(e) => {
+            setExternalId(e.target.value);
+            setExternalIdManual(true);
+          }}
+          placeholder={
+            storeId
+              ? mappingForStore?.shopifyProductId
+                ? "已自动回填"
+                : "例如 9876543210（该店铺未推送过此产品，需手填）"
+              : "请先选择目标店铺"
+          }
+          disabled={!storeId}
+          className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs disabled:opacity-50"
         />
         <p className="mt-1 text-xs text-muted-foreground">
-          未来本字段将自动从 store_product 映射回填，目前需手填。
+          {storeId
+            ? mappingForStore?.shopifyProductId && !externalIdManual
+              ? `✓ 已从 store_product 映射回填（产品在该店铺的 Shopify ID）`
+              : "该店铺未推送过此产品，请手填 Shopify 端的 product_external_id"
+            : "选择店铺后会自动尝试从映射回填"}
         </p>
       </div>
     </Dialog>

@@ -116,10 +116,16 @@ export const productSnapshotApi = {
   detail: (id: number) => api.get<ProductSnapshotDetail>(`/product-snapshot/${id}`),
   manifest: (id: number) => api.get<Record<string, unknown>>(`/product-snapshot/${id}/manifest`),
   csvUrl: (id: number) => `/api/product-snapshot/${id}/csv`,
-  manual: (storeId: number, productExternalId: string, tenantId: number) =>
+  manual: (
+    storeId: number,
+    productExternalId: string,
+    tenantId: number,
+    /** 本平台 product.id；产品详情页触发时传，避免后端反查 store_product 拿不到映射 → product_id 入库 NULL */
+    productId?: number
+  ) =>
     api.post<{ snapshotId: number; queued: boolean; message?: string }>(
       `/product-snapshot/manual`,
-      { storeId, productExternalId, tenantId }
+      { storeId, productExternalId, tenantId, productId }
     ),
 };
 

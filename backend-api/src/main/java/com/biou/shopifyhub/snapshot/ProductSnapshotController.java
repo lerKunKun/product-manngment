@@ -205,11 +205,19 @@ public class ProductSnapshotController {
         long tenantId = req.tenantId == null ? 1L : req.tenantId;
 
         String externalId = req.productExternalId.trim();
+        // product_id 来源优先级：
+        //  1. 前端显式传 productId（产品详情页触发时直接知道本平台 id，最准）
+        //  2. 反查 store_product 映射（push 后才有；webhook 路径用这个）
+        // 两条都拿不到才允许 null（首次纯 Shopify 端建产品 + 手填 ID 测试）。
+        Long productId = req.productId != null
+            ? req.productId
+            : resolvePlatformProductId(req.storeId, externalId);
+
         ProductSnapshot snap = new ProductSnapshot();
         snap.setTenantId(tenantId);
         snap.setStoreId(req.storeId);
         snap.setProductExternalId(externalId);
-        snap.setProductId(resolvePlatformProductId(req.storeId, externalId));
+        snap.setProductId(productId);
         snap.setTriggerEvent("MANUAL");
         snap.setStatus("PENDING");
         snap.setTotalBytes(0L);
@@ -240,5 +248,7 @@ public class ProductSnapshotController {
         public Long storeId;
         public String productExternalId;
         public Long tenantId;
+        /** 本平台 product.id；产品详情页触发时直接传，免去反查 store_product 失败导致 NULL */
+        public Long productId;
     }
 }
