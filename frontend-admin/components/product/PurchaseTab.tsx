@@ -205,7 +205,7 @@ export function PurchaseTab({ productId }: { productId: number }) {
       }
     }
     setBatchApplying(false);
-    if (fail === 0) toast.success(`✓ 批量更新 ${BATCH_LABEL[batchField]}（${ok}/${ids.length}）`);
+    if (fail === 0) toast.success(`批量更新 ${BATCH_LABEL[batchField]}（${ok}/${ids.length}）`);
     else toast.error(`部分失败：成功 ${ok}，失败 ${fail}`);
     setBatchField(null);
     setBatchValue("");

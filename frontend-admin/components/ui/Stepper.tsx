@@ -1,3 +1,4 @@
+import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type StepperState = "completed" | "current" | "pending" | "failed";
@@ -47,11 +48,13 @@ export function Stepper({
                   it.state === "failed" && "bg-rose-500 text-white"
                 )}
               >
-                {it.state === "completed"
-                  ? "✓"
-                  : it.state === "failed"
-                    ? "✗"
-                    : i + 1}
+                {it.state === "completed" ? (
+                  <Check className="h-4 w-4" />
+                ) : it.state === "failed" ? (
+                  <X className="h-4 w-4" />
+                ) : (
+                  i + 1
+                )}
               </div>
               <div className="flex flex-1 justify-start">
                 {!isLast && <div className={cn("h-0.5 w-full", lineRightCls)} />}

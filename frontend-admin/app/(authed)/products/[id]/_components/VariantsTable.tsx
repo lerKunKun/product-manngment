@@ -9,6 +9,7 @@ import {
   type ProductImage,
 } from "@/lib/api/product";
 import type { ApiError } from "@/lib/api/client";
+import { useToast } from "@/components/ui/Toast";
 
 /**
  * 变体表（参照 Shopify Admin → Product → Variants）。
@@ -30,15 +31,14 @@ export function VariantsTable({
   options,
   images,
   onChange,
-  onMessage,
 }: {
   productId: number;
   variants: ProductVariant[];
   options: ProductOption[];
   images: ProductImage[];
   onChange: () => void;
-  onMessage: (msg: string) => void;
 }) {
+  const toast = useToast();
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // 批量编辑 popover
@@ -160,7 +160,7 @@ export function VariantsTable({
       await productApi.variantUpdate(v.id, patch);
       onChange();
     } catch (e) {
-      onMessage((e as ApiError).message);
+      toast.error((e as ApiError).message);
       // 失败回滚 draft
       setDrafts((dr) => ({
         ...dr,
@@ -182,20 +182,20 @@ export function VariantsTable({
         inventoryQty: 1000,
         inventoryPolicy: "continue",
       });
-      onMessage(`✓ 已新增变体 #${r.id}`);
+      toast.success(`已新增变体 #${r.id}`);
       onChange();
     } catch (e) {
-      onMessage((e as ApiError).message);
+      toast.error((e as ApiError).message);
     }
   }
   async function delOne(v: ProductVariant) {
     if (!confirm(`删除变体 #${v.id} (SKU: ${v.sku})？`)) return;
     try {
       await productApi.variantDelete(v.id);
-      onMessage("✓ 已删除");
+      toast.success("已删除");
       onChange();
     } catch (e) {
-      onMessage((e as ApiError).message);
+      toast.error((e as ApiError).message);
     }
   }
   async function changeSku(v: ProductVariant) {
@@ -210,10 +210,10 @@ export function VariantsTable({
         code
       );
       await productApi.changeSku(v.id, newSku, sensitiveToken);
-      onMessage("✓ SKU 已变更（log 已落 sku_change_log）");
+      toast.success("SKU 已变更（log 已落 sku_change_log）");
       onChange();
     } catch (e) {
-      onMessage((e as ApiError).message);
+      toast.error((e as ApiError).message);
     }
   }
 
@@ -222,7 +222,7 @@ export function VariantsTable({
     if (!batchField || selectedIds.size === 0) return;
     const raw = batchValue.trim();
     if (raw === "") {
-      onMessage("请输入新值");
+      toast.warn("请输入新值");
       return;
     }
     const ids = [...selectedIds];
@@ -242,11 +242,11 @@ export function VariantsTable({
       }
     }
     setBatchApplying(false);
-    onMessage(
-      fail === 0
-        ? `✓ 批量更新${batchField === "price" ? "价格" : "库存"}（${ok}/${ids.length}）`
-        : `部分失败：成功 ${ok}，失败 ${fail}`
-    );
+    if (fail === 0) {
+      toast.success(`批量更新${batchField === "price" ? "价格" : "库存"}（${ok}/${ids.length}）`);
+    } else {
+      toast.error(`部分失败：成功 ${ok}，失败 ${fail}`);
+    }
     setBatchField(null);
     setBatchValue("");
     setSelectedIds(new Set());
@@ -268,11 +268,11 @@ export function VariantsTable({
       }
     }
     setBatchApplying(false);
-    onMessage(
-      fail === 0
-        ? `✓ 已删除 ${ok} 个变体`
-        : `部分失败：成功 ${ok}，失败 ${fail}`
-    );
+    if (fail === 0) {
+      toast.success(`已删除 ${ok} 个变体`);
+    } else {
+      toast.error(`部分失败：成功 ${ok}，失败 ${fail}`);
+    }
     setSelectedIds(new Set());
     onChange();
   }

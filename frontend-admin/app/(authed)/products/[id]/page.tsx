@@ -10,6 +10,7 @@ import {
   type ProductOption,
 } from "@/lib/api/product";
 import type { ApiError } from "@/lib/api/client";
+import { useToast } from "@/components/ui/Toast";
 import { RichTextEditor } from "@/components/editor/RichTextEditor";
 import { SnapshotTriggerDialog } from "@/components/snapshot/SnapshotTriggerDialog";
 import { PushTriggerDialog } from "@/components/push/PushTriggerDialog";
@@ -50,11 +51,11 @@ export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
 
+  const toast = useToast();
   const [d, setD] = useState<ProductDetail | null>(null);
   const [options, setOptions] = useState<ProductOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [msg, setMsg] = useState("");
   const [snapshotOpen, setSnapshotOpen] = useState(false);
   const [pushOpen, setPushOpen] = useState(false);
   const [subTab, setSubTab] = useState<SubTab>("purchase");
@@ -93,7 +94,6 @@ export default function ProductDetailPage() {
 
   async function saveAll() {
     if (!draft) return;
-    setMsg("");
     try {
       await productApi.update(id, {
         title: draft.title,
@@ -107,10 +107,10 @@ export default function ProductDetailPage() {
         seoDescription: draft.seoDescription,
         templateSuffix: draft.templateSuffix ?? null,
       });
-      setMsg("✓ 已保存");
+      toast.success("已保存");
       load();
     } catch (e) {
-      setMsg((e as ApiError).message);
+      toast.error((e as ApiError).message);
     }
   }
 
@@ -174,17 +174,6 @@ export default function ProductDetailPage() {
         }}
       />
 
-      {msg && (
-        <p
-          className={
-            "text-sm " +
-            (msg.startsWith("✓") ? "text-emerald-700" : "text-destructive")
-          }
-        >
-          {msg}
-        </p>
-      )}
-
       {/* 外部链接 chips（标题之上的诉求实际是结构上的"主标题之上"，这里放在大标题下、
           表单之上的 chips bar，符合 Shopify "Status / Tags above title" 的视觉逻辑 ） */}
       <ExternalLinksBar productId={id} />
@@ -223,7 +212,6 @@ export default function ProductDetailPage() {
             options={options}
             images={d.images}
             onChange={load}
-            onMessage={setMsg}
           />
 
           {/* SEO */}
@@ -287,7 +275,6 @@ export default function ProductDetailPage() {
             productId={id}
             product={draft}
             onProductPatch={patchDraft}
-            onMessage={setMsg}
           />
         </div>
       </div>

@@ -8,9 +8,17 @@ import {
   useMemo,
   useState,
 } from "react";
+import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ToastKind = "success" | "error" | "info" | "warn";
+
+const TOAST_ICON: Record<ToastKind, React.ComponentType<{ className?: string }>> = {
+  success: CheckCircle2,
+  error: XCircle,
+  warn: AlertTriangle,
+  info: Info,
+};
 
 type ToastItem = {
   id: number;
@@ -112,7 +120,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             )}
           >
             <div className="flex items-start justify-between gap-2">
-              <span className="break-words">{t.message}</span>
+              <div className="flex min-w-0 items-start gap-2">
+                {(() => {
+                  const Icon = TOAST_ICON[t.kind];
+                  return <Icon className="mt-0.5 h-4 w-4 shrink-0" />;
+                })()}
+                <span className="break-words">{t.message}</span>
+              </div>
               <button
                 type="button"
                 aria-label="关闭"

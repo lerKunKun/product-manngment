@@ -6,6 +6,7 @@ import { productApi, type ProductDoc } from "@/lib/api/product";
 import type { ApiError } from "@/lib/api/client";
 import { RichTextEditor } from "@/components/editor/RichTextEditor";
 import { FileUploadDropzone } from "@/components/upload/FileUploadDropzone";
+import { useToast } from "@/components/ui/Toast";
 import { TagInput } from "./TagInput";
 
 const inp =
@@ -16,10 +17,10 @@ const inp =
  * 文件上传走与产品图片相同的 UI：拖拽 dropzone + 必填 tag + 选填备注。
  */
 export function DocsTab({ productId }: { productId: number }) {
+  const toast = useToast();
   const [list, setList] = useState<ProductDoc[]>([]);
   const [richHtml, setRichHtml] = useState("");
   const [richTitle, setRichTitle] = useState("需求文档");
-  const [msg, setMsg] = useState("");
 
   // 上传草稿（点完拖拽 → 弹标签/备注表单 → 确认上传）
   type Draft = { files: File[]; tags: string[]; remark: string };
@@ -51,26 +52,24 @@ export function DocsTab({ productId }: { productId: number }) {
 
   function onPickFiles(files: File[]) {
     setDraft({ files, tags: [], remark: "" });
-    setMsg("");
   }
 
   async function commitUpload() {
     if (!draft) return;
     if (draft.tags.length === 0) {
-      setMsg("请至少添加一个标签");
+      toast.warn("请至少添加一个标签");
       return;
     }
     setBusy(true);
-    setMsg("");
     try {
       for (const f of draft.files) {
         await productApi.docUpload(productId, f, draft.tags, draft.remark);
       }
-      setMsg("✓ 文件已上传到 R2");
+      toast.success("文件已上传到 R2");
       setDraft(null);
       load();
     } catch (e) {
-      setMsg((e as ApiError).message);
+      toast.error((e as ApiError).message);
     } finally {
       setBusy(false);
     }
@@ -80,10 +79,10 @@ export function DocsTab({ productId }: { productId: number }) {
     try {
       const exist = list.find((d) => d.type === "RICH_TEXT");
       await productApi.docSaveRich(productId, richHtml, richTitle, exist?.id);
-      setMsg("✓ 富文本已保存");
+      toast.success("富文本已保存");
       load();
     } catch (e) {
-      setMsg((e as ApiError).message);
+      toast.error((e as ApiError).message);
     }
   }
   async function del(d: ProductDoc) {
@@ -96,26 +95,15 @@ export function DocsTab({ productId }: { productId: number }) {
       return;
     try {
       await productApi.docDelete(d.id);
-      setMsg("✓ 已删除");
+      toast.success("已删除");
       load();
     } catch (e) {
-      setMsg((e as ApiError).message);
+      toast.error((e as ApiError).message);
     }
   }
 
   return (
     <div className="space-y-5">
-      {msg && (
-        <p
-          className={
-            "text-sm " +
-            (msg.startsWith("✓") ? "text-emerald-700" : "text-destructive")
-          }
-        >
-          {msg}
-        </p>
-      )}
-
       <section className="rounded-lg border bg-background p-4">
         <h3 className="mb-3 text-sm font-medium">需求文档（富文本）</h3>
         <input

@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/product";
 import type { ApiError } from "@/lib/api/client";
 import { Badge } from "@/components/ui/Badge";
+import { useToast } from "@/components/ui/Toast";
 
 const STATUS_VARIANT: Record<Product["status"], "success" | "warning" | "neutral"> = {
   active: "success",
@@ -28,19 +29,17 @@ export function RightPanel({
   productId,
   product,
   onProductPatch,
-  onMessage,
 }: {
   productId: number;
   product: Product;
   /** 父组件保存到后端后会重新 load；这里只更新本地草稿。 */
   onProductPatch: (patch: Partial<Product>) => void;
-  onMessage: (msg: string) => void;
 }) {
   return (
     <aside className="space-y-4">
       <StatusCard product={product} onProductPatch={onProductPatch} />
       <OrganizationCard product={product} onProductPatch={onProductPatch} />
-      <MetafieldsCard productId={productId} onMessage={onMessage} />
+      <MetafieldsCard productId={productId} />
     </aside>
   );
 }
@@ -150,11 +149,10 @@ function OrganizationCard({
 
 function MetafieldsCard({
   productId,
-  onMessage,
 }: {
   productId: number;
-  onMessage: (msg: string) => void;
 }) {
+  const toast = useToast();
   const [list, setList] = useState<ProductMetafield[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<{
@@ -170,7 +168,7 @@ function MetafieldsCard({
     try {
       setList(await productApi.metafieldList(productId));
     } catch (e) {
-      onMessage((e as ApiError).message);
+      toast.error((e as ApiError).message);
     } finally {
       setLoading(false);
     }
@@ -182,17 +180,17 @@ function MetafieldsCard({
 
   async function add() {
     if (!draft.namespace.trim() || !draft.key.trim()) {
-      onMessage("namespace 和 key 必填");
+      toast.warn("namespace 和 key 必填");
       return;
     }
     setBusy(true);
     try {
       await productApi.metafieldCreate(productId, draft);
-      onMessage("✓ metafield 已添加");
+      toast.success("metafield 已添加");
       setDraft({ ...draft, key: "", value: "" });
       load();
     } catch (e) {
-      onMessage((e as ApiError).message);
+      toast.error((e as ApiError).message);
     } finally {
       setBusy(false);
     }
@@ -203,7 +201,7 @@ function MetafieldsCard({
       await productApi.metafieldDelete(id);
       load();
     } catch (e) {
-      onMessage((e as ApiError).message);
+      toast.error((e as ApiError).message);
     }
   }
 

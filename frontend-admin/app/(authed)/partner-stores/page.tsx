@@ -18,6 +18,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Check } from "lucide-react";
 import { storeApi, type StoreItem } from "@/lib/api/store";
 import { previewApi, type PreviewTheme } from "@/lib/api/preview";
 import { useToast } from "@/components/ui/Toast";
@@ -230,8 +231,9 @@ export default function PartnerStoresPage() {
                     </td>
                     <td className="px-3 py-2 text-center">
                       {isPc ? (
-                        <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
-                          ✓ 池内
+                        <span className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900">
+                          <Check className="h-3 w-3" />
+                          池内
                         </span>
                       ) : (
                         <span className="text-muted-foreground">-</span>

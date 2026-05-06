@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { CheckCircle2 } from "lucide-react";
 import { useAuthStore } from "@/lib/auth/store";
 import { FileUploadDropzone } from "@/components/upload/FileUploadDropzone";
 
@@ -99,7 +100,10 @@ export default function ImportProductsPage() {
 
       {report && (
         <div className="rounded-lg border bg-background p-5 text-sm">
-          <p className="font-medium text-emerald-700">✓ 成功导入 {report.success} 个产品</p>
+          <p className="flex items-center gap-1.5 font-medium text-emerald-700">
+            <CheckCircle2 className="h-4 w-4" />
+            成功导入 {report.success} 个产品
+          </p>
           {report.errors.length > 0 && (
             <>
               <p className="mt-3 font-medium text-amber-700">失败 {report.errors.length} 条：</p>

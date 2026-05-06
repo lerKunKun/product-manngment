@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingBlock, EmptyState, ErrorBanner } from "@/components/ui/StatusBlocks";
 import {
@@ -153,8 +154,9 @@ export default function CrossAuthPage() {
 
       {expiringSoon.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
-          <div className="font-medium text-amber-900">
-            ⚠ {t("crossAuth.expiringSoonTitle").replace("{{count}}", String(expiringSoon.length))}
+          <div className="flex items-center gap-1.5 font-medium text-amber-900">
+            <AlertTriangle className="h-4 w-4" />
+            {t("crossAuth.expiringSoonTitle").replace("{{count}}", String(expiringSoon.length))}
           </div>
           <ul className="mt-2 space-y-1 text-sm text-amber-900">
             {expiringSoon.map((g) => (

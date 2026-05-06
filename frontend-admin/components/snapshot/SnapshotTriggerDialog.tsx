@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Check } from "lucide-react";
 import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
 import { Spinner } from "@/components/ui/StatusBlocks";
@@ -167,8 +168,9 @@ export function SnapshotTriggerDialog({
             readOnly
             className="w-full rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs text-muted-foreground"
           />
-          <p className="mt-1 text-xs text-muted-foreground">
-            ✓ 自该店铺的 store_product 映射读取
+          <p className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <Check className="h-3 w-3 text-emerald-600" />
+            自该店铺的 store_product 映射读取
             {selectedMapping.lastPushedAt && (
               <>
                 ；上次推送：

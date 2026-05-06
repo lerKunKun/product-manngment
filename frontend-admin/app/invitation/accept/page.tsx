@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { CheckCircle2 } from "lucide-react";
 import { invitationApi, type InvitationPreview } from "@/lib/api/invitation";
 import { ApiError } from "@/lib/api/client";
 
@@ -145,8 +146,9 @@ function Inner() {
 
         {phase === "success" && (
           <div className="space-y-3 rounded-md border border-emerald-300 bg-emerald-50 p-6 text-center">
-            <p className="text-sm font-medium text-emerald-900">
-              ✓ 邀请已接受
+            <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-900">
+              <CheckCircle2 className="h-4 w-4" />
+              邀请已接受
             </p>
             <p className="text-xs text-emerald-700">即将跳转...</p>
           </div>

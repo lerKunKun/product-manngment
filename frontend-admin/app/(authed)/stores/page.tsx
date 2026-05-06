@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, Globe, Loader2, Settings2 } from "lucide-react";
 import {
   storeApi,
   type StoreItem,
@@ -22,20 +23,16 @@ import { useI18n } from "@/lib/i18n/context";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import type { MessageKey } from "@/lib/i18n/messages";
 
-/** 域名 → 国旗 emoji。覆盖 biou-XX.myshopify.com 命名约定 + 兜底 🌐 */
-const COUNTRY_FLAG: Record<string, string> = {
-  cn: "🇨🇳", us: "🇺🇸", jp: "🇯🇵", de: "🇩🇪", fr: "🇫🇷",
-  uk: "🇬🇧", gb: "🇬🇧", au: "🇦🇺", ca: "🇨🇦", in: "🇮🇳",
-  br: "🇧🇷", mx: "🇲🇽", es: "🇪🇸", it: "🇮🇹", kr: "🇰🇷",
-  sg: "🇸🇬", hk: "🇭🇰", tw: "🇹🇼", nl: "🇳🇱", ru: "🇷🇺",
-};
-function flagFor(domain: string): string {
+/** 域名 → ISO 国家 code（uppercase）。覆盖 biou-XX.myshopify.com 命名约定。 */
+const KNOWN_COUNTRIES = new Set([
+  "CN", "US", "JP", "DE", "FR", "UK", "GB", "AU", "CA", "IN",
+  "BR", "MX", "ES", "IT", "KR", "SG", "HK", "TW", "NL", "RU",
+]);
+function countryCodeFor(domain: string): string | null {
   const m = domain.match(/^[^.]*?-([a-z]{2})\b/i) ?? domain.match(/^([a-z]{2})\./i);
-  if (m) {
-    const code = m[1].toLowerCase();
-    if (COUNTRY_FLAG[code]) return COUNTRY_FLAG[code];
-  }
-  return "🌐";
+  if (!m) return null;
+  const code = m[1].toUpperCase();
+  return KNOWN_COUNTRIES.has(code) ? code : null;
 }
 
 /** 状态显示映射：DISABLED 在 UI 上显示 PAUSED */
@@ -441,12 +438,20 @@ export default function StoresPage() {
                 key={s.id}
                 className="flex flex-col rounded-lg border bg-background p-4 transition-shadow hover:shadow-sm"
               >
-                {/* 顶部：国旗 + 域名 + 状态 */}
+                {/* 顶部：地球 icon + 国家代码 chip + 域名 + 状态 */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-start gap-2">
-                    <span className="text-2xl leading-none" aria-hidden>
-                      {flagFor(s.myshopifyDomain)}
-                    </span>
+                    <div
+                      className="flex h-7 items-center gap-1 rounded-md border bg-muted/40 px-1.5 text-xs font-medium text-muted-foreground"
+                      aria-label={countryCodeFor(s.myshopifyDomain) ?? "store"}
+                    >
+                      <Globe className="h-3.5 w-3.5" />
+                      {countryCodeFor(s.myshopifyDomain) && (
+                        <span className="font-mono text-[10px] tracking-wide">
+                          {countryCodeFor(s.myshopifyDomain)}
+                        </span>
+                      )}
+                    </div>
                     <div className="min-w-0">
                       <div
                         className="truncate font-mono text-sm font-medium"
@@ -528,7 +533,7 @@ export default function StoresPage() {
                           info.cls
                         }
                       >
-                        {isPending && <span className="inline-block animate-spin">⌛</span>}
+                        {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
                         {t(info.i18nKey)}
                       </span>
                       <button
@@ -588,7 +593,11 @@ export default function StoresPage() {
                       className="rounded p-1.5 text-muted-foreground hover:bg-accent disabled:opacity-50"
                       aria-label="健康检查"
                     >
-                      {healthChecking[s.id] ? "⌛" : "👁"}
+                      {healthChecking[s.id] ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
                     </button>
                     <DropdownMenu
                       align="right"
@@ -599,7 +608,7 @@ export default function StoresPage() {
                           aria-label="更多操作"
                           title="更多操作"
                         >
-                          ⚙
+                          <Settings2 className="h-4 w-4" />
                         </button>
                       }
                     >
