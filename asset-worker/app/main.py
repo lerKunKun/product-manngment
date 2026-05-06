@@ -11,6 +11,7 @@ from botocore.client import Config
 from fastapi import FastAPI
 
 from app.config import settings
+from app.routes import diff as diff_routes
 from app.routes import preview as preview_routes
 from app.routes import pull as pull_routes
 from app.routes import push as push_routes
@@ -42,6 +43,7 @@ app = FastAPI(
 app.include_router(pull_routes.router)
 app.include_router(push_routes.router)
 app.include_router(preview_routes.router)
+app.include_router(diff_routes.router)
 
 
 @app.get("/health")
