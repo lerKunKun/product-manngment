@@ -38,7 +38,8 @@ public class PushController {
     @PostMapping("/product")
     @PreAuthorize("hasAuthority('PERM_PRODUCT:PUSH')")
     public Result<Map<String, Object>> push(@RequestBody PushRequest req) {
-        Long taskId = pushService.push(req.productId(), req.storeId(), req.triggeredBy());
+        Long taskId = pushService.push(
+            req.productId(), req.storeId(), req.triggeredBy(), req.templateVersionOverrideId());
         return Result.ok(Map.of("taskId", taskId));
     }
 
@@ -50,7 +51,7 @@ public class PushController {
     @PreAuthorize("hasAuthority('PERM_PRODUCT:PUSH')")
     public Result<Map<String, Object>> batch(@RequestBody BatchPushRequest req) {
         PushService.BatchResult r = pushService.pushBatch(
-            req.productIds(), req.storeId(), req.triggeredBy());
+            req.productIds(), req.storeId(), req.triggeredBy(), req.templateVersionOverrideId());
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("parentTaskId", r.parentTaskId());
         resp.put("subTaskIds", r.subTaskIds());
@@ -62,6 +63,12 @@ public class PushController {
         return Result.ok(resp);
     }
 
-    public record PushRequest(long productId, long storeId, Long triggeredBy) {}
-    public record BatchPushRequest(List<Long> productIds, long storeId, Long triggeredBy) {}
+    /**
+     * Push request. {@code templateVersionOverrideId} is Track AS5: when set,
+     * this single push uses that {@code base_template_version}'s default
+     * replace rules (per-store custom rules are ignored). Null → use the
+     * store's persisted binding.
+     */
+    public record PushRequest(long productId, long storeId, Long triggeredBy, Long templateVersionOverrideId) {}
+    public record BatchPushRequest(List<Long> productIds, long storeId, Long triggeredBy, Long templateVersionOverrideId) {}
 }

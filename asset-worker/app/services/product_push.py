@@ -126,6 +126,64 @@ class ProductPushService:
         new_payload["images"] = new_images
         return new_payload, list(keys)
 
+    @staticmethod
+    def _set_metafields(
+        admin: Any,
+        shopify_product_id: str,
+        metafields: list[dict],
+    ) -> dict:
+        """Re-seed product metafields on the target store via GraphQL ``metafieldsSet``.
+
+        Track AS5: cross-store push needs to bring the source product's
+        metafields along. Each entry is shaped like ``{namespace, key, type,
+        value}`` (matching our ``product_metafield`` rows). The Shopify product
+        gid is constructed from the numeric REST id.
+
+        Returns Shopify's metafields response on success or raises
+        :class:`ShopifyAdminError` (which the caller catches & logs).
+        """
+        if not metafields:
+            return {"metafields": [], "userErrors": []}
+        owner_id = f"gid://shopify/Product/{shopify_product_id}"
+        inputs: list[dict] = []
+        for mf in metafields:
+            namespace = mf.get("namespace")
+            key = mf.get("key")
+            if not namespace or not key:
+                continue
+            inputs.append(
+                {
+                    "ownerId": owner_id,
+                    "namespace": namespace,
+                    "key": key,
+                    "type": mf.get("type") or "single_line_text_field",
+                    "value": "" if mf.get("value") is None else str(mf.get("value")),
+                }
+            )
+        if not inputs:
+            return {"metafields": [], "userErrors": []}
+        query = (
+            "mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {"
+            " metafieldsSet(metafields: $metafields) {"
+            "   metafields { id namespace key type value }"
+            "   userErrors { field message code }"
+            " }"
+            "}"
+        )
+        data = admin.graphql(query, {"metafields": inputs})
+        wrapper = data.get("metafieldsSet")
+        if not isinstance(wrapper, dict):
+            raise ShopifyAdminError("metafieldsSet response missing 'metafieldsSet' object")
+        user_errors = wrapper.get("userErrors") or []
+        if user_errors:
+            # Treat userErrors as a soft failure: caller catches and logs, the
+            # product itself is already created. Keep the diagnostics in body.
+            raise ShopifyAdminError(f"metafieldsSet userErrors: {user_errors}")
+        return {
+            "metafields": wrapper.get("metafields") or [],
+            "userErrors": [],
+        }
+
     # ----------------------------------------------------------------- public
 
     def push(
@@ -149,6 +207,11 @@ class ProductPushService:
         # Shopify, so a failed download surfaces as 502 (R2FetchError) before
         # we even authenticate against Admin.
         prepared_payload, _keys = self._attach_r2_media(product_payload)
+        # Track AS5: ``metafields`` is NOT part of Shopify's REST product create
+        # body — strip it here and re-seed via GraphQL ``metafieldsSet`` after
+        # the product exists. ``template_suffix`` is a normal product field
+        # that Shopify accepts inline, so leave it on the payload.
+        metafields_to_set = prepared_payload.pop("metafields", None) or []
         return self._push_real(
             shop_domain=shop_domain,
             tenant_id=tenant_id,
@@ -156,6 +219,7 @@ class ProductPushService:
             task_id=task_id,
             product_payload=prepared_payload,
             access_token=access_token,
+            metafields=metafields_to_set,
         )
 
     # ------------------------------------------------------------------ modes
@@ -168,6 +232,7 @@ class ProductPushService:
         task_id: int,
         product_payload: dict,
         access_token: Optional[str],
+        metafields: Optional[list[dict]] = None,
     ) -> dict:
         started_at = _now_iso()
         clock_start = time.perf_counter()
@@ -207,11 +272,30 @@ class ProductPushService:
                 "dry_run": False,
             }
 
-        completed_at = _now_iso()
-        elapsed = round(time.perf_counter() - clock_start, 3)
-
         actual_handle = shopify_product.get("handle")
         shopify_product_id = shopify_product.get("id")
+
+        # Track AS5: re-seed product metafields via GraphQL metafieldsSet.
+        # Best-effort — a failure here does NOT roll back the product create.
+        # Surfaced in the response so callers can audit / retry.
+        metafields_set_result: Optional[dict] = None
+        if metafields and shopify_product_id is not None:
+            try:
+                metafields_set_result = self._set_metafields(
+                    admin, str(shopify_product_id), metafields
+                )
+            except ShopifyAdminError as exc:
+                logger.warning(
+                    "metafieldsSet failed shop=%s task=%s product=%s: %s",
+                    shop_domain,
+                    task_id,
+                    shopify_product_id,
+                    exc,
+                )
+                metafields_set_result = {"error": str(exc)}
+
+        completed_at = _now_iso()
+        elapsed = round(time.perf_counter() - clock_start, 3)
 
         conflict: Optional[dict] = None
         if (
@@ -241,7 +325,7 @@ class ProductPushService:
             elapsed,
         )
 
-        return {
+        result = {
             "task_id": task_id,
             "shopify_product_id": str(shopify_product_id) if shopify_product_id is not None else None,
             "shopify_handle": actual_handle,
@@ -251,6 +335,9 @@ class ProductPushService:
             "completed_at": completed_at,
             "dry_run": False,
         }
+        if metafields_set_result is not None:
+            result["metafields_set"] = metafields_set_result
+        return result
 
     def _push_dry_run(
         self,
@@ -263,6 +350,9 @@ class ProductPushService:
         started_at = _now_iso()
         synthetic_id = _synthetic_shopify_id()
         requested_handle = product_payload.get("handle") or "dry-run-handle"
+        # Track AS5: surface metafields in dry-run response so UI can verify
+        # what would have been re-seeded on the target store.
+        synthetic_metafields = list(product_payload.get("metafields") or [])
 
         # Synthesize attachments for any media_r2_keys without touching R2 —
         # so end-to-end UI work never blocks on missing R2 creds.
@@ -299,7 +389,7 @@ class ProductPushService:
             synthetic_id,
         )
 
-        return {
+        result = {
             "task_id": task_id,
             "shopify_product_id": synthetic_id,
             "shopify_handle": requested_handle,
@@ -309,3 +399,18 @@ class ProductPushService:
             "completed_at": _now_iso(),
             "dry_run": True,
         }
+        if synthetic_metafields:
+            result["metafields_set"] = {
+                "metafields": [
+                    {
+                        "namespace": mf.get("namespace"),
+                        "key": mf.get("key"),
+                        "type": mf.get("type"),
+                        "value": mf.get("value"),
+                    }
+                    for mf in synthetic_metafields
+                    if mf.get("namespace") and mf.get("key")
+                ],
+                "userErrors": [],
+            }
+        return result

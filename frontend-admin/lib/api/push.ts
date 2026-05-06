@@ -18,6 +18,8 @@ export const pushApi = {
     productId: number;
     storeId: number;
     triggeredBy?: number | null;
+    /** Track AS5：本次推送临时使用的 base_template_version；不写回 binding。 */
+    templateVersionOverrideId?: number | null;
   }) => api.post<{ taskId: number }>("/push/product", params),
 
   /** W2-PUSH-05: 批量推送，后端串行循环推送，所有子任务挂同一个 parent_task_id。 */
@@ -25,5 +27,7 @@ export const pushApi = {
     productIds: number[];
     storeId: number;
     triggeredBy?: number | null;
+    /** Track AS5：本次推送临时使用的 base_template_version；不写回 binding。 */
+    templateVersionOverrideId?: number | null;
   }) => api.post<BatchPushResp>("/push/batch", params),
 };

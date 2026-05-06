@@ -27,6 +27,8 @@ public class Product {
     private String seoDescription;
     /** active / draft / archived */
     private String status;
+    /** Shopify product.template_suffix — 决定店铺端使用哪个 product.<suffix>.liquid 模板（V40） */
+    private String templateSuffix;
     private Long createdBy;
 
     @TableField(fill = FieldFill.INSERT)
@@ -64,6 +66,8 @@ public class Product {
     public void setSeoDescription(String seoDescription) { this.seoDescription = seoDescription; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getTemplateSuffix() { return templateSuffix; }
+    public void setTemplateSuffix(String templateSuffix) { this.templateSuffix = templateSuffix; }
     public Long getCreatedBy() { return createdBy; }
     public void setCreatedBy(Long createdBy) { this.createdBy = createdBy; }
     public LocalDateTime getCreatedAt() { return createdAt; }
