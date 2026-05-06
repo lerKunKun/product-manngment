@@ -43,6 +43,9 @@ class BasePullRequest(BaseModel):
     tenant_id: int
     store_id: int
     snapshot_id: int
+    # Optional explicit token (e.g. SyncConsumer decrypted it from store row).
+    # When set, bypasses ShopifyCliClient entirely — no `shopify` CLI needed.
+    access_token: Optional[str] = Field(default=None, min_length=1)
 
 
 class PullThemeRequest(BasePullRequest):
@@ -79,6 +82,28 @@ def _get_cli_client() -> ShopifyCliClient:
     return _cli_client
 
 
+class _ExplicitTokenCli:
+    """Minimal CLI-shaped adapter that returns a fixed token for any shop.
+
+    Lets pull services call ``cli.get_token(shop)`` uniformly while bypassing
+    the real ``shopify`` CLI subprocess when caller already has a token (e.g.
+    SyncConsumer decrypted ``store.encrypted_access_token``).
+    """
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    def get_token(self, _shop_domain: str) -> str:  # noqa: D401 - matches CLI client API
+        return self._token
+
+
+def _cli_for(req: BasePullRequest):
+    """Pick CLI source: explicit token from request → wrapper; otherwise real CLI."""
+    if req.access_token:
+        return _ExplicitTokenCli(req.access_token)
+    return _get_cli_client()
+
+
 def _build_progress(snapshot_id: int) -> ProgressEmitter:
     """Per-request emitter; no-op if BACKEND_PROGRESS_URL is empty."""
     return ProgressEmitter(
@@ -113,7 +138,7 @@ def _map_pull_exception(label: str, exc: Exception) -> HTTPException:
 async def pull_theme(req: PullThemeRequest) -> dict:
     progress = _build_progress(req.snapshot_id)
     svc = ThemePullService(
-        shopify_cli=_get_cli_client(),
+        shopify_cli=_cli_for(req),
         r2_client=_get_r2_client(),
         dry_run=settings.worker_dry_run,
         progress=progress,
@@ -137,7 +162,7 @@ async def pull_theme(req: PullThemeRequest) -> dict:
 async def pull_policy(req: BasePullRequest) -> dict:
     progress = _build_progress(req.snapshot_id)
     svc = PolicyPullService(
-        shopify_cli=_get_cli_client(),
+        shopify_cli=_cli_for(req),
         r2_client=_get_r2_client(),
         dry_run=settings.worker_dry_run,
         progress=progress,
@@ -160,7 +185,7 @@ async def pull_policy(req: BasePullRequest) -> dict:
 async def pull_menu(req: BasePullRequest) -> dict:
     progress = _build_progress(req.snapshot_id)
     svc = MenuPullService(
-        shopify_cli=_get_cli_client(),
+        shopify_cli=_cli_for(req),
         r2_client=_get_r2_client(),
         dry_run=settings.worker_dry_run,
         progress=progress,
@@ -183,7 +208,7 @@ async def pull_menu(req: BasePullRequest) -> dict:
 async def pull_collection(req: BasePullRequest) -> dict:
     progress = _build_progress(req.snapshot_id)
     svc = CollectionPullService(
-        shopify_cli=_get_cli_client(),
+        shopify_cli=_cli_for(req),
         r2_client=_get_r2_client(),
         dry_run=settings.worker_dry_run,
         progress=progress,
@@ -206,7 +231,7 @@ async def pull_collection(req: BasePullRequest) -> dict:
 async def pull_product(req: PullProductRequest) -> dict:
     progress = _build_progress(req.snapshot_id)
     svc = ProductPullService(
-        shopify_cli=_get_cli_client(),
+        shopify_cli=_cli_for(req),
         r2_client=_get_r2_client(),
         dry_run=settings.worker_dry_run,
         progress=progress,
@@ -236,7 +261,7 @@ async def pull_product(req: PullProductRequest) -> dict:
 async def pull_files(req: BasePullRequest) -> dict:
     progress = _build_progress(req.snapshot_id)
     svc = FilesPullService(
-        shopify_cli=_get_cli_client(),
+        shopify_cli=_cli_for(req),
         r2_client=_get_r2_client(),
         dry_run=settings.worker_dry_run,
         progress=progress,
@@ -259,7 +284,7 @@ async def pull_files(req: BasePullRequest) -> dict:
 async def pull_shop_settings(req: BasePullRequest) -> dict:
     progress = _build_progress(req.snapshot_id)
     svc = ShopSettingsPullService(
-        shopify_cli=_get_cli_client(),
+        shopify_cli=_cli_for(req),
         r2_client=_get_r2_client(),
         dry_run=settings.worker_dry_run,
         progress=progress,
@@ -282,7 +307,7 @@ async def pull_shop_settings(req: BasePullRequest) -> dict:
 async def pull_metafields(req: BasePullRequest) -> dict:
     progress = _build_progress(req.snapshot_id)
     svc = MetafieldsPullService(
-        shopify_cli=_get_cli_client(),
+        shopify_cli=_cli_for(req),
         r2_client=_get_r2_client(),
         dry_run=settings.worker_dry_run,
         progress=progress,

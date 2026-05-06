@@ -146,7 +146,7 @@ public class SyncConsumer {
 
         // ---- 子任务 1：拉主题（不需要 productId） ----
         totalSubtasks++;
-        WorkerOutcome themeOut = pullTheme(store, snap.getId());
+        WorkerOutcome themeOut = pullTheme(store, snap.getId(), accessToken);
         if (themeOut.ok()) {
             successSubtasks++;
             totalBytes += themeOut.totalBytes();
@@ -178,7 +178,7 @@ public class SyncConsumer {
                     for (int i = 0; i < n; i++) {
                         long pid = productIds.get(i);
                         totalSubtasks++;
-                        WorkerOutcome out = pullProduct(store, snap.getId(), pid);
+                        WorkerOutcome out = pullProduct(store, snap.getId(), pid, accessToken);
                         if (out.ok()) {
                             successSubtasks++;
                             totalBytes += out.totalBytes();
@@ -193,7 +193,7 @@ public class SyncConsumer {
 
         // ---- 子任务 N+1：拉 Files 库（AS3-05） ----
         totalSubtasks++;
-        WorkerOutcome filesOut = pullFiles(store, snap.getId());
+        WorkerOutcome filesOut = pullFiles(store, snap.getId(), accessToken);
         if (filesOut.ok()) {
             successSubtasks++;
             totalBytes += filesOut.totalBytes();
@@ -204,7 +204,7 @@ public class SyncConsumer {
 
         // ---- 子任务 N+2：拉店铺设置（AS3-05） ----
         totalSubtasks++;
-        WorkerOutcome settingsOut = pullShopSettings(store, snap.getId());
+        WorkerOutcome settingsOut = pullShopSettings(store, snap.getId(), accessToken);
         if (settingsOut.ok()) {
             successSubtasks++;
             totalBytes += settingsOut.totalBytes();
@@ -215,7 +215,7 @@ public class SyncConsumer {
 
         // ---- 子任务 N+3：拉店铺级 metafields（AS3-05） ----
         totalSubtasks++;
-        WorkerOutcome metaOut = pullMetafields(store, snap.getId());
+        WorkerOutcome metaOut = pullMetafields(store, snap.getId(), accessToken);
         if (metaOut.ok()) {
             successSubtasks++;
             totalBytes += metaOut.totalBytes();
@@ -247,53 +247,45 @@ public class SyncConsumer {
             snapshotId, store.getId(), finalStatus, successSubtasks, totalSubtasks, totalFiles, totalBytes);
     }
 
-    private WorkerOutcome pullTheme(Store store, long snapshotId) {
+    /**
+     * 拼通用 4+1 字段：shop_domain / tenant_id / store_id / snapshot_id +（可选）access_token。
+     * accessToken 非空时一并塞 reqBody，让 worker 跳过 shopify CLI fallback。
+     */
+    private Map<String, Object> baseReq(Store store, long snapshotId, String accessToken) {
         Map<String, Object> req = new LinkedHashMap<>();
         req.put("shop_domain", store.getMyshopifyDomain());
         req.put("tenant_id", store.getTenantId());
         req.put("store_id", store.getId());
         req.put("snapshot_id", snapshotId);
-        return callWorkerJson("/pull/theme", req);
+        if (accessToken != null && !accessToken.isBlank()) {
+            req.put("access_token", accessToken);
+        }
+        return req;
     }
 
-    private WorkerOutcome pullProduct(Store store, long snapshotId, long productId) {
-        Map<String, Object> req = new LinkedHashMap<>();
-        req.put("shop_domain", store.getMyshopifyDomain());
-        req.put("tenant_id", store.getTenantId());
-        req.put("store_id", store.getId());
-        req.put("snapshot_id", snapshotId);
+    private WorkerOutcome pullTheme(Store store, long snapshotId, String accessToken) {
+        return callWorkerJson("/pull/theme", baseReq(store, snapshotId, accessToken));
+    }
+
+    private WorkerOutcome pullProduct(Store store, long snapshotId, long productId, String accessToken) {
+        Map<String, Object> req = baseReq(store, snapshotId, accessToken);
         req.put("product_id", productId);
         return callWorkerJson("/pull/product", req);
     }
 
     /** AS3-05：调 worker {@code POST /pull/files}（Shopify Files 库）。 */
-    private WorkerOutcome pullFiles(Store store, long snapshotId) {
-        Map<String, Object> req = new LinkedHashMap<>();
-        req.put("shop_domain", store.getMyshopifyDomain());
-        req.put("tenant_id", store.getTenantId());
-        req.put("store_id", store.getId());
-        req.put("snapshot_id", snapshotId);
-        return callWorkerJson("/pull/files", req);
+    private WorkerOutcome pullFiles(Store store, long snapshotId, String accessToken) {
+        return callWorkerJson("/pull/files", baseReq(store, snapshotId, accessToken));
     }
 
     /** AS3-05：调 worker {@code POST /pull/shop_settings}（shop / locations / shipping_zones / markets）。 */
-    private WorkerOutcome pullShopSettings(Store store, long snapshotId) {
-        Map<String, Object> req = new LinkedHashMap<>();
-        req.put("shop_domain", store.getMyshopifyDomain());
-        req.put("tenant_id", store.getTenantId());
-        req.put("store_id", store.getId());
-        req.put("snapshot_id", snapshotId);
-        return callWorkerJson("/pull/shop_settings", req);
+    private WorkerOutcome pullShopSettings(Store store, long snapshotId, String accessToken) {
+        return callWorkerJson("/pull/shop_settings", baseReq(store, snapshotId, accessToken));
     }
 
     /** AS3-05：调 worker {@code POST /pull/metafields}（SHOP-level metafield definitions + instances）。 */
-    private WorkerOutcome pullMetafields(Store store, long snapshotId) {
-        Map<String, Object> req = new LinkedHashMap<>();
-        req.put("shop_domain", store.getMyshopifyDomain());
-        req.put("tenant_id", store.getTenantId());
-        req.put("store_id", store.getId());
-        req.put("snapshot_id", snapshotId);
-        return callWorkerJson("/pull/metafields", req);
+    private WorkerOutcome pullMetafields(Store store, long snapshotId, String accessToken) {
+        return callWorkerJson("/pull/metafields", baseReq(store, snapshotId, accessToken));
     }
 
     private WorkerOutcome callWorkerJson(String path, Map<String, Object> body) {
