@@ -329,6 +329,200 @@ def test_push_with_media_r2_keys_dry_run_synthesizes_attachments():
         assert decoded  # non-empty
 
 
+# ------------------------------------------------- Track AS5 (suffix + metafields) ---
+
+
+def test_template_suffix_is_forwarded_to_shopify():
+    cli = MagicMock()
+    cli.get_token.return_value = "shpat_test"
+
+    fake = _FakeAdmin(
+        product={"id": 999, "handle": "with-suffix", "title": "T"}
+    )
+    svc = ProductPushService(
+        shopify_cli=cli,
+        admin_factory=_factory_for(fake),
+        dry_run=False,
+    )
+
+    payload = _payload(handle="with-suffix")
+    payload["template_suffix"] = "premium"
+
+    out = svc.push(
+        shop_domain=SHOP,
+        tenant_id=1,
+        store_id=3,
+        task_id=42,
+        product_payload=payload,
+    )
+
+    # admin.create_product saw template_suffix verbatim — it is a normal Shopify
+    # product field, NOT a worker-internal extension like media_r2_keys.
+    assert len(fake.calls) == 1
+    _method, sent = fake.calls[0]
+    assert sent.get("template_suffix") == "premium"
+    assert out["dry_run"] is False
+
+
+class _FakeAdminWithGraphQL(_FakeAdmin):
+    """``_FakeAdmin`` augmented with a ``graphql`` shim for metafieldsSet tests."""
+
+    def __init__(
+        self,
+        product: dict | None = None,
+        graphql_response: dict | None = None,
+        graphql_error: Exception | None = None,
+    ) -> None:
+        super().__init__(product=product)
+        self._graphql_response = graphql_response or {
+            "metafieldsSet": {"metafields": [], "userErrors": []}
+        }
+        self._graphql_error = graphql_error
+        self.graphql_calls: list[tuple] = []
+
+    def graphql(self, query: str, variables: dict | None = None) -> dict:
+        self.graphql_calls.append((query, variables))
+        if self._graphql_error is not None:
+            raise self._graphql_error
+        return self._graphql_response
+
+
+def test_metafields_are_set_via_graphql_after_create():
+    cli = MagicMock()
+    cli.get_token.return_value = "shpat_test"
+
+    fake = _FakeAdminWithGraphQL(
+        product={"id": 5555, "handle": "with-mf", "title": "MF"},
+        graphql_response={
+            "metafieldsSet": {
+                "metafields": [
+                    {
+                        "id": "gid://shopify/Metafield/1",
+                        "namespace": "custom",
+                        "key": "tagline",
+                        "type": "single_line_text_field",
+                        "value": "Hello {{brand}}",
+                    }
+                ],
+                "userErrors": [],
+            }
+        },
+    )
+    svc = ProductPushService(
+        shopify_cli=cli,
+        admin_factory=_factory_for(fake),
+        dry_run=False,
+    )
+
+    payload = _payload(handle="with-mf")
+    payload["metafields"] = [
+        {
+            "namespace": "custom",
+            "key": "tagline",
+            "type": "single_line_text_field",
+            "value": "Hello {{brand}}",
+        },
+        # Skip-eligible: missing namespace.
+        {"key": "ignore_me", "value": "x"},
+    ]
+
+    out = svc.push(
+        shop_domain=SHOP,
+        tenant_id=1,
+        store_id=3,
+        task_id=10,
+        product_payload=payload,
+    )
+
+    # Product create body MUST NOT carry metafields — Shopify REST product
+    # create rejects them. They go through metafieldsSet AFTER the product
+    # exists.
+    _method, sent_payload = fake.calls[0]
+    assert "metafields" not in sent_payload
+
+    # GraphQL metafieldsSet was hit once with the gid + the well-formed entry only.
+    assert len(fake.graphql_calls) == 1
+    _q, variables = fake.graphql_calls[0]
+    assert variables is not None
+    assert variables["metafields"] == [
+        {
+            "ownerId": "gid://shopify/Product/5555",
+            "namespace": "custom",
+            "key": "tagline",
+            "type": "single_line_text_field",
+            "value": "Hello {{brand}}",
+        }
+    ]
+
+    # Result echoes Shopify's metafieldsSet payload for caller-side audit.
+    assert out["metafields_set"]["metafields"][0]["namespace"] == "custom"
+
+
+def test_metafields_user_errors_do_not_fail_push():
+    cli = MagicMock()
+    cli.get_token.return_value = "shpat_test"
+
+    fake = _FakeAdminWithGraphQL(
+        product={"id": 6666, "handle": "with-mf-err", "title": "MFE"},
+        graphql_response={
+            "metafieldsSet": {
+                "metafields": [],
+                "userErrors": [{"field": ["value"], "message": "Bad type", "code": "INVALID_TYPE"}],
+            }
+        },
+    )
+    svc = ProductPushService(
+        shopify_cli=cli,
+        admin_factory=_factory_for(fake),
+        dry_run=False,
+    )
+
+    payload = _payload(handle="with-mf-err")
+    payload["metafields"] = [
+        {
+            "namespace": "custom",
+            "key": "broken",
+            "type": "broken_type",
+            "value": "x",
+        }
+    ]
+
+    # Push must STILL succeed (product was created); metafields_set carries the error.
+    out = svc.push(
+        shop_domain=SHOP,
+        tenant_id=1,
+        store_id=3,
+        task_id=11,
+        product_payload=payload,
+    )
+    assert out["shopify_product_id"] == "6666"
+    assert "error" in out["metafields_set"]
+
+
+def test_no_metafields_means_no_graphql_call():
+    cli = MagicMock()
+    cli.get_token.return_value = "shpat_test"
+
+    fake = _FakeAdminWithGraphQL(
+        product={"id": 7000, "handle": "no-mf", "title": "NM"}
+    )
+    svc = ProductPushService(
+        shopify_cli=cli,
+        admin_factory=_factory_for(fake),
+        dry_run=False,
+    )
+    out = svc.push(
+        shop_domain=SHOP,
+        tenant_id=1,
+        store_id=3,
+        task_id=12,
+        product_payload=_payload(handle="no-mf"),
+    )
+    assert out["shopify_product_id"] == "7000"
+    assert fake.graphql_calls == []
+    assert "metafields_set" not in out
+
+
 def test_push_r2_fetch_failure_raises():
     cli = MagicMock()
     cli.get_token.return_value = "shpat_test"

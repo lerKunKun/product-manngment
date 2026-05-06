@@ -5,9 +5,11 @@ import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.product.entity.Product;
 import com.biou.shopifyhub.product.entity.ProductImage;
+import com.biou.shopifyhub.product.entity.ProductMetafield;
 import com.biou.shopifyhub.product.entity.ProductVariant;
 import com.biou.shopifyhub.product.mapper.ProductImageMapper;
 import com.biou.shopifyhub.product.mapper.ProductMapper;
+import com.biou.shopifyhub.product.mapper.ProductMetafieldMapper;
 import com.biou.shopifyhub.product.mapper.ProductVariantMapper;
 import com.biou.shopifyhub.notification.NotificationDispatcher;
 import com.biou.shopifyhub.notification.NotificationEventCode;
@@ -20,6 +22,12 @@ import com.biou.shopifyhub.push.mapper.TaskMapper;
 import com.biou.shopifyhub.store.StoreService;
 import com.biou.shopifyhub.store.entity.Store;
 import com.biou.shopifyhub.store.mapper.StoreMapper;
+import com.biou.shopifyhub.template.ReplaceEngine;
+import com.biou.shopifyhub.template.RuleSpec;
+import com.biou.shopifyhub.template.binding.StoreTemplateBinding;
+import com.biou.shopifyhub.template.binding.StoreTemplateBindingService;
+import com.biou.shopifyhub.template.entity.BaseTemplateVersion;
+import com.biou.shopifyhub.template.mapper.BaseTemplateVersionMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -71,6 +79,7 @@ public class PushService {
     private final ProductMapper productMapper;
     private final ProductVariantMapper variantMapper;
     private final ProductImageMapper imageMapper;
+    private final ProductMetafieldMapper metafieldMapper;
     private final StoreMapper storeMapper;
     private final StoreService storeService;
     private final StoreProductMapper storeProductMapper;
@@ -78,6 +87,8 @@ public class PushService {
     private final PushConflictMapper conflictMapper;
     private final ObjectMapper objectMapper;
     private final NotificationDispatcher notificationDispatcher;
+    private final StoreTemplateBindingService bindingService;
+    private final BaseTemplateVersionMapper versionMapper;
 
     /**
      * Default admin user id used as the recipient of {@code PRODUCT_PUSH_FAIL}
@@ -96,16 +107,20 @@ public class PushService {
     public PushService(ProductMapper productMapper,
                        ProductVariantMapper variantMapper,
                        ProductImageMapper imageMapper,
+                       ProductMetafieldMapper metafieldMapper,
                        StoreMapper storeMapper,
                        StoreService storeService,
                        StoreProductMapper storeProductMapper,
                        TaskMapper taskMapper,
                        PushConflictMapper conflictMapper,
                        ObjectMapper objectMapper,
-                       NotificationDispatcher notificationDispatcher) {
+                       NotificationDispatcher notificationDispatcher,
+                       StoreTemplateBindingService bindingService,
+                       BaseTemplateVersionMapper versionMapper) {
         this.productMapper = productMapper;
         this.variantMapper = variantMapper;
         this.imageMapper = imageMapper;
+        this.metafieldMapper = metafieldMapper;
         this.storeMapper = storeMapper;
         this.storeService = storeService;
         this.storeProductMapper = storeProductMapper;
@@ -113,6 +128,8 @@ public class PushService {
         this.conflictMapper = conflictMapper;
         this.objectMapper = objectMapper;
         this.notificationDispatcher = notificationDispatcher;
+        this.bindingService = bindingService;
+        this.versionMapper = versionMapper;
     }
 
     /**
@@ -120,6 +137,15 @@ public class PushService {
      * task id only after the worker call has returned (or failed).
      */
     public Long push(long productId, long storeId, Long triggeredBy) {
+        return push(productId, storeId, triggeredBy, null);
+    }
+
+    /**
+     * Push variant that lets the caller override the {@code base_template_version}
+     * for this single push (Track AS5). Pass {@code null} to fall back to the
+     * store's persisted binding (or no binding → no replacement).
+     */
+    public Long push(long productId, long storeId, Long triggeredBy, Long templateVersionOverrideId) {
         Product product = productMapper.selectById(productId);
         if (product == null) {
             throw new BusinessException(ResultCode.NOT_FOUND, "product not found: " + productId);
@@ -135,8 +161,19 @@ public class PushService {
         List<ProductImage> images = imageMapper.selectList(
             new QueryWrapper<ProductImage>().eq("product_id", productId).orderByAsc("position")
         );
+        List<ProductMetafield> metafields = metafieldMapper.selectList(
+            new QueryWrapper<ProductMetafield>().eq("product_id", productId)
+        );
 
-        Map<String, Object> productPayload = buildProductPayload(product, variants, images);
+        // Resolve replace rules from binding (or override). If override is set
+        // we IGNORE the binding's custom rules and use ONLY the override
+        // version's defaults — semantically "this push pretends store is bound
+        // to that version, no per-store custom".
+        ResolvedRules resolved = resolveRulesFor(storeId, templateVersionOverrideId);
+
+        Map<String, Integer> ruleHits = new LinkedHashMap<>();
+        Map<String, Object> productPayload = buildProductPayload(
+            product, variants, images, metafields, resolved.rules(), ruleHits);
 
         Map<String, Object> reqBody = new LinkedHashMap<>();
         reqBody.put("shop_domain", store.getMyshopifyDomain());
@@ -172,13 +209,25 @@ public class PushService {
             // payload_json reflects the worker request (sans access_token), plus
             // productId at top level so TaskController can find the source row
             // without parsing nested JSON or reverse-querying store_product.
+            // Replace-rule hits are recorded for downstream visibility (no
+            // dedicated column yet — TODO: add result_extra_json column to task).
             Map<String, Object> payloadForLog = new LinkedHashMap<>();
             payloadForLog.put("productId", productId);
             payloadForLog.putAll(reqBody);
             payloadForLog.remove("access_token");
+            if (resolved.versionId() != null) {
+                payloadForLog.put("templateVersionId", resolved.versionId());
+            }
+            if (!ruleHits.isEmpty()) {
+                payloadForLog.put("replaceRuleHits", ruleHits);
+            }
             task.setPayloadJson(objectMapper.writeValueAsString(payloadForLog));
         } catch (Exception e) {
             task.setPayloadJson("{}");
+        }
+        if (resolved.versionId() != null || !ruleHits.isEmpty()) {
+            log.info("[push] productId={} storeId={} templateVersionId={} replaceRuleHits={}",
+                productId, storeId, resolved.versionId(), ruleHits);
         }
         taskMapper.insert(task);
         Long taskId = task.getId();
@@ -294,6 +343,10 @@ public class PushService {
         return push(productId, storeId, triggeredBy);
     }
 
+    public Long pushAsync(long productId, long storeId, Long triggeredBy, Long templateVersionOverrideId) {
+        return push(productId, storeId, triggeredBy, templateVersionOverrideId);
+    }
+
     /**
      * Batch push multiple products to one store (W2-PUSH-05).
      *
@@ -310,6 +363,10 @@ public class PushService {
      * PARTIAL, otherwise {@code SUCCESS}.
      */
     public BatchResult pushBatch(List<Long> productIds, long storeId, Long triggeredBy) {
+        return pushBatch(productIds, storeId, triggeredBy, null);
+    }
+
+    public BatchResult pushBatch(List<Long> productIds, long storeId, Long triggeredBy, Long templateVersionOverrideId) {
         if (productIds == null || productIds.isEmpty()) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "productIds must not be empty");
         }
@@ -345,7 +402,7 @@ public class PushService {
             if (pid == null) continue;
             Long subId;
             try {
-                subId = push(pid, storeId, triggeredBy);
+                subId = push(pid, storeId, triggeredBy, templateVersionOverrideId);
             } catch (Exception e) {
                 // Validation failure (e.g. product not found) before task row was inserted.
                 log.warn("[push-batch] sub push threw productId={} storeId={} err={}",
@@ -393,15 +450,47 @@ public class PushService {
 
     // ---------------------------------------------------------------- helpers
 
-    private Map<String, Object> buildProductPayload(Product p, List<ProductVariant> variants, List<ProductImage> images) {
+    /**
+     * Build the worker-facing product payload.
+     *
+     * <p>Track AS5: applies the store-binding's merged replace rules to the
+     * text fields ({@code body_html}, {@code seo_description},
+     * {@code metafields[].value}), accumulates per-rule hit counts into
+     * {@code ruleHits}, transmits {@code template_suffix} when set, and
+     * always re-emits the product's persisted metafields so the worker
+     * can re-seed them on the target store via GraphQL {@code metafieldsSet}.
+     */
+    private Map<String, Object> buildProductPayload(Product p,
+                                                    List<ProductVariant> variants,
+                                                    List<ProductImage> images,
+                                                    List<ProductMetafield> metafields,
+                                                    Map<String, RuleSpec> rules,
+                                                    Map<String, Integer> ruleHits) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("title", p.getTitle());
         if (p.getHandle() != null) payload.put("handle", p.getHandle());
-        if (p.getBodyHtml() != null) payload.put("body_html", p.getBodyHtml());
+        if (p.getBodyHtml() != null) {
+            payload.put("body_html", ReplaceEngine.applyAccumulating(p.getBodyHtml(), rules, ruleHits));
+        }
         if (p.getVendor() != null) payload.put("vendor", p.getVendor());
         if (p.getType() != null) payload.put("product_type", p.getType());
         if (p.getTags() != null) payload.put("tags", p.getTags());
         payload.put("status", p.getStatus() == null ? "active" : p.getStatus());
+        if (p.getTemplateSuffix() != null && !p.getTemplateSuffix().isBlank()) {
+            payload.put("template_suffix", p.getTemplateSuffix());
+        }
+        if (p.getSeoDescription() != null) {
+            // SEO description rides as a metafield on Shopify (global.description_tag);
+            // we still publish it as plain top-level so worker can choose how to
+            // surface it. Going through the engine first means cross-store pushes
+            // drop the source brand from the SEO copy too.
+            payload.put("seo_description",
+                ReplaceEngine.applyAccumulating(p.getSeoDescription(), rules, ruleHits));
+        }
+        if (p.getSeoTitle() != null) {
+            payload.put("seo_title",
+                ReplaceEngine.applyAccumulating(p.getSeoTitle(), rules, ruleHits));
+        }
 
         List<Map<String, Object>> variantPayloads = new ArrayList<>();
         for (ProductVariant v : variants) {
@@ -453,8 +542,65 @@ public class PushService {
         if (!mediaR2Keys.isEmpty()) {
             payload.put("media_r2_keys", mediaR2Keys);
         }
+
+        // Metafields: re-seed on target store via worker GraphQL metafieldsSet.
+        // Apply replace rules to `value` (the most likely place brand strings
+        // appear, e.g. shop description / about copy). namespace/key/type are
+        // identifiers and stay verbatim.
+        if (metafields != null && !metafields.isEmpty()) {
+            List<Map<String, Object>> mfPayloads = new ArrayList<>();
+            for (ProductMetafield m : metafields) {
+                if (m.getNamespace() == null || m.getKey() == null) continue;
+                Map<String, Object> mp = new LinkedHashMap<>();
+                mp.put("namespace", m.getNamespace());
+                mp.put("key", m.getKey());
+                mp.put("type", m.getType() == null ? "single_line_text_field" : m.getType());
+                mp.put("value", ReplaceEngine.applyAccumulating(m.getValue(), rules, ruleHits));
+                mfPayloads.add(mp);
+            }
+            if (!mfPayloads.isEmpty()) {
+                payload.put("metafields", mfPayloads);
+            }
+        }
         return payload;
     }
+
+    /**
+     * Resolve the active replace-rule set for a push.
+     *
+     * <p>Resolution order:
+     * <ol>
+     *   <li>If {@code overrideVersionId} is provided, use ONLY that version's
+     *       {@code default_replace_rules_json}. Per-store custom rules are
+     *       deliberately skipped — caller wanted "this push pretends another
+     *       template version is bound", and persisting custom diffs across
+     *       versions opens too many edge cases.</li>
+     *   <li>Else if a binding exists, merge the binding's version defaults
+     *       with the binding's {@code custom_replace_rules_json} (custom
+     *       wins on key collision).</li>
+     *   <li>Else: empty rules — the engine becomes a no-op.</li>
+     * </ol>
+     */
+    private ResolvedRules resolveRulesFor(long storeId, Long overrideVersionId) {
+        if (overrideVersionId != null) {
+            BaseTemplateVersion v = versionMapper.selectById(overrideVersionId);
+            if (v == null) {
+                throw new BusinessException(ResultCode.NOT_FOUND,
+                    "templateVersionOverrideId not found: " + overrideVersionId);
+            }
+            return new ResolvedRules(overrideVersionId,
+                bindingService.parseRules(v.getDefaultReplaceRulesJson()));
+        }
+        StoreTemplateBinding binding = bindingService.getOrEmpty(storeId);
+        if (binding == null) {
+            return new ResolvedRules(null, Map.of());
+        }
+        return new ResolvedRules(binding.getBaseTemplateVersionId(),
+            bindingService.resolveMergedRules(
+                binding.getBaseTemplateVersionId(), binding.getCustomReplaceRulesJson()));
+    }
+
+    private record ResolvedRules(Long versionId, Map<String, RuleSpec> rules) {}
 
     private void upsertStoreProduct(Long tenantId,
                                     long storeId,
