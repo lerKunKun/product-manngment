@@ -471,6 +471,10 @@ export const messages = {
     "templateVersion.form.insertExample": "插入示例规则",
     "templateVersion.form.invalidJson": "JSON 解析失败，请检查格式",
     "templateVersion.form.invalidVersion": "版本号需符合 semver-ish（如 1.0.0 / 1.1.0-beta）",
+    "templateVersion.form.zip": "模板 zip（必填）",
+    "templateVersion.form.zipHint": "上传该版本对应的初始化主题 zip 包；最大 100MB。",
+    "templateVersion.form.zipRequired": "请选择 zip 文件",
+    "templateVersion.form.uploadAndCreate": "上传 zip 并创建版本",
     "templateVersion.saveSuccess": "已保存",
     "templateVersion.deleteSuccess": "已删除",
 
@@ -980,6 +984,10 @@ export const messages = {
     "templateVersion.form.insertExample": "Insert sample rules",
     "templateVersion.form.invalidJson": "Invalid JSON, please check the syntax.",
     "templateVersion.form.invalidVersion": "Version must be semver-ish (e.g. 1.0.0 / 1.1.0-beta).",
+    "templateVersion.form.zip": "Template ZIP (required)",
+    "templateVersion.form.zipHint": "Upload the initialization theme ZIP for this version; max 100MB.",
+    "templateVersion.form.zipRequired": "Please select a ZIP file",
+    "templateVersion.form.uploadAndCreate": "Upload ZIP & create version",
     "templateVersion.saveSuccess": "Saved",
     "templateVersion.deleteSuccess": "Deleted",
 

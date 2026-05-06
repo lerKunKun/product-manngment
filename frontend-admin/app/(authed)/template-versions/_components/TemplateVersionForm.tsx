@@ -15,65 +15,55 @@ const inp =
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 export type TemplateVersionFormValue = {
-  templateId: number | null;
   version: string;
   description: string;
   defaultReplaceRulesJson: string;
 };
 
 /**
- * AS6 · 模板版本新建 / 编辑共享表单。
+ * AS6 · 模板版本编辑表单（仅 edit）。
  *
- * <p>新建模式：templateId 必选 + 版本号 + 描述 + JSON。
- * 编辑模式：templateId 锁定（已有版本不允许迁库），其它字段可改。
+ * <p>新建走 /template-versions/new 的 multipart 上传流程（不复用此组件），
+ * 因为 V15 zip_r2_key NOT NULL，模板版本本质必带 zip 文件。
  *
  * <p>提交前在客户端做：
  *   1. version 走 semver-ish 校验
  *   2. defaultReplaceRulesJson 非空时 JSON.parse 校验
- *   3. 校验失败抛错给上层 toast
+ *   3. templateId 锁定（已有版本不允许迁库）
  */
 export function TemplateVersionForm({
-  mode,
   initial,
   saving,
   onSubmit,
   onCancel,
 }: {
-  mode: "create" | "edit";
-  initial?: Partial<TemplateVersion> | null;
+  initial: Partial<TemplateVersion>;
   saving?: boolean;
   onSubmit: (v: TemplateVersionFormValue) => void;
   onCancel?: () => void;
 }) {
   const { t } = useI18n();
-  const [templateId, setTemplateId] = useState<number | null>(
-    initial?.templateId ?? null
-  );
-  const [version, setVersion] = useState<string>(initial?.version ?? "");
+  const templateId = initial.templateId ?? null;
+  const [version, setVersion] = useState<string>(initial.version ?? "");
   const [description, setDescription] = useState<string>(
-    initial?.description ?? initial?.changelog ?? ""
+    initial.description ?? initial.changelog ?? ""
   );
   const [rulesJson, setRulesJson] = useState<string>(
-    initial?.defaultReplaceRulesJson ?? ""
+    initial.defaultReplaceRulesJson ?? ""
   );
 
   const [templates, setTemplates] = useState<BaseTemplate[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
   const [errors, setErrors] = useState<{ version?: string; rulesJson?: string }>({});
 
-  // 拉模板下拉（取所有，最多 200，足够日常使用）
+  // 拉模板列表只为展示模板名（templateId 不可改）
   useEffect(() => {
     let alive = true;
-    setTemplatesLoading(true);
     templateApi
       .list(1, 200)
       .then((r) => {
         if (alive) setTemplates(r.records ?? []);
       })
-      .catch(() => {
-        // toast 已上报
-      })
-      .finally(() => alive && setTemplatesLoading(false));
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -97,20 +87,21 @@ export function TemplateVersionForm({
         next.rulesJson = t("templateVersion.form.invalidJson");
       }
     }
-    if (mode === "create" && !templateId) {
-      // 必选模板
-      next.version = next.version ?? t("templateVersion.form.namePlaceholder");
-    }
     setErrors(next);
     if (next.version || next.rulesJson) return;
 
     onSubmit({
-      templateId,
       version: version.trim(),
       description,
       defaultReplaceRulesJson: rulesJson.trim(),
     });
   }
+
+  const templateName = (() => {
+    const found = templates.find((tt) => tt.id === templateId);
+    if (found) return `${found.name} · #${found.id}`;
+    return templateId != null ? `#${templateId}` : "-";
+  })();
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
@@ -118,32 +109,7 @@ export function TemplateVersionForm({
         <label className="mb-1 block text-sm font-medium">
           {t("templateVersion.form.name")}
         </label>
-        {mode === "edit" ? (
-          <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
-            {(() => {
-              const found = templates.find((tt) => tt.id === templateId);
-              if (found) return `${found.name} · #${found.id}`;
-              return templateId != null ? `#${templateId}` : "-";
-            })()}
-          </div>
-        ) : (
-          <select
-            value={templateId ?? ""}
-            onChange={(e) =>
-              setTemplateId(e.target.value ? Number(e.target.value) : null)
-            }
-            className={inp}
-            disabled={templatesLoading}
-            required
-          >
-            <option value="">{t("templateVersion.form.namePlaceholder")}</option>
-            {templates.map((tt) => (
-              <option key={tt.id} value={tt.id}>
-                {tt.name} · #{tt.id} ({tt.code})
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">{templateName}</div>
       </div>
 
       <div>

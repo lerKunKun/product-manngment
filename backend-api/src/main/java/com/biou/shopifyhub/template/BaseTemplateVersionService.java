@@ -20,16 +20,17 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * AS6 · 模板版本（base_template_version）独立 CRUD。
+ * AS6 · 模板版本（base_template_version）的查询 + metadata 编辑。
  *
- * <p>表结构由 V15 提供，本 service 仅做 metadata（版本号 / changelog / 默认替换规则）的管理；
- * zip 上传仍走 {@link BaseTemplateService#uploadVersion}（含 R2 + sha256 校验）。
+ * <p>表结构由 V15 提供。**新建版本必须走 {@link BaseTemplateService#uploadVersion}**
+ * （multipart 含 zip + sha256 + R2），因为 V15 的 zip_r2_key 是 NOT NULL，
+ * 模板版本本质是一份带 zip 的初始化模板。
  *
- * <p>提供给 AS6 模板版本管理 UI 使用：
+ * <p>本 service 提供：
  * <ul>
- *   <li>分页 list（关键字搜模板名 / version / changelog）</li>
- *   <li>create：要求 templateId 已存在；version 走 semver-ish 校验；defaultReplaceRulesJson 必须合法 JSON</li>
- *   <li>update：仅改 metadata 字段；不动 zip_r2_key / sha256 / bytes</li>
+ *   <li>分页 list（关键字搜 version / changelog）</li>
+ *   <li>update：仅改 metadata 字段（version / changelog / defaultReplaceRulesJson / status）；
+ *       不动 zip_r2_key / sha256 / bytes（要换 zip 走 W3-TPL-02 的多版本上传）</li>
  *   <li>delete：软删（@TableLogic 走 deleted_at）</li>
  * </ul>
  */
@@ -94,46 +95,6 @@ public class BaseTemplateVersionService {
         }
         BaseTemplate t = v.getTemplateId() == null ? null : templateMapper.selectById(v.getTemplateId());
         return toView(v, t == null ? null : t.getName());
-    }
-
-    public Long create(CreateRequest req, Long userId) {
-        if (req == null) {
-            throw new BusinessException(ResultCode.VALIDATION_FAILED, "body required");
-        }
-        if (req.templateId() == null) {
-            throw new BusinessException(ResultCode.VALIDATION_FAILED, "templateId required");
-        }
-        if (templateMapper.selectById(req.templateId()) == null) {
-            throw new BusinessException(ResultCode.VALIDATION_FAILED,
-                "template " + req.templateId() + " not found");
-        }
-        validateVersion(req.version());
-        validateJson(req.defaultReplaceRulesJson());
-
-        // 同 templateId 下 version 唯一
-        BaseTemplateVersion existing = versionMapper.selectOne(
-            new LambdaQueryWrapper<BaseTemplateVersion>()
-                .eq(BaseTemplateVersion::getTemplateId, req.templateId())
-                .eq(BaseTemplateVersion::getVersion, req.version()));
-        if (existing != null) {
-            throw new BusinessException(ResultCode.VALIDATION_FAILED,
-                "version " + req.version() + " already exists for template " + req.templateId());
-        }
-
-        BaseTemplateVersion v = new BaseTemplateVersion();
-        v.setTemplateId(req.templateId());
-        v.setVersion(req.version());
-        v.setChangelog(req.description());
-        v.setDefaultReplaceRulesJson(req.defaultReplaceRulesJson());
-        // V15: zip_r2_key NOT NULL —— 此 metadata-only 路径暂用占位串，
-        // zip 真正落 R2 走 BaseTemplateService.uploadVersion
-        v.setZipR2Key("");
-        v.setStatus("DRAFT");
-        v.setCreatedBy(userId);
-        versionMapper.insert(v);
-        log.info("base_template_version (metadata) inserted id={} templateId={} version={} by={}",
-            v.getId(), req.templateId(), req.version(), userId);
-        return v.getId();
     }
 
     public void update(Long id, UpdateRequest req) {
@@ -233,13 +194,6 @@ public class BaseTemplateVersionService {
             return 0;
         }
     }
-
-    public record CreateRequest(
-        Long templateId,
-        String version,
-        String description,
-        String defaultReplaceRulesJson
-    ) {}
 
     public record UpdateRequest(
         String version,

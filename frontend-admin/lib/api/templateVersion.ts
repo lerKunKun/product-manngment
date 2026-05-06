@@ -1,11 +1,11 @@
 import { api } from "./client";
 
 /**
- * AS6 · 模板版本（base_template_version）独立 CRUD 前端封装。
- * 后端：BaseTemplateVersionController（/base-template-version）。
+ * AS6 · 模板版本（base_template_version）查询 + metadata 编辑前端封装。
  *
- * <p>注：此模块只管 metadata（version / changelog / 默认替换规则 / status）；
- * zip 真正落 R2 仍走 templateApi.uploadVersion（W3-TPL-03）。
+ * <p>**新建版本走 templateApi.uploadVersion**（multipart 含 zip + 钉钉敏感码），
+ * 因为 V15 表的 zip_r2_key 是 NOT NULL，模板版本本质是带 zip 的初始化模板。
+ * 本模块仅暴露 list / detail / update / remove。
  */
 
 export type TemplateVersion = {
@@ -44,13 +44,6 @@ function buildQuery(params: Record<string, string | number | undefined | null>):
   return parts.length > 0 ? "?" + parts.join("&") : "";
 }
 
-export type TemplateVersionCreateBody = {
-  templateId: number;
-  version: string;
-  description?: string;
-  defaultReplaceRulesJson?: string;
-};
-
 export type TemplateVersionUpdateBody = {
   version?: string;
   description?: string;
@@ -66,9 +59,6 @@ export const templateVersionApi = {
 
   detail: (id: number) =>
     api.get<TemplateVersion>(`/base-template-version/${id}`),
-
-  create: (body: TemplateVersionCreateBody) =>
-    api.post<number>("/base-template-version", body),
 
   update: (id: number, body: TemplateVersionUpdateBody) =>
     api.put<void>(`/base-template-version/${id}`, body),

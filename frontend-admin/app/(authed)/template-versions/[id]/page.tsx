@@ -71,7 +71,6 @@ export default function EditTemplateVersionPage() {
       </h1>
 
       <TemplateVersionForm
-        mode="edit"
         initial={data}
         saving={saving}
         onCancel={() => router.push("/template-versions")}
