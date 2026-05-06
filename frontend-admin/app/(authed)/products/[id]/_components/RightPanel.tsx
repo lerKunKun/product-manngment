@@ -125,6 +125,22 @@ function OrganizationCard({
           className={inp}
         />
       </div>
+      <div>
+        <label className="mb-1 block text-xs font-medium">
+          Template suffix
+        </label>
+        <input
+          value={product.templateSuffix ?? ""}
+          onChange={(e) =>
+            onProductPatch({ templateSuffix: e.target.value || null })
+          }
+          className={inp}
+          placeholder="e.g. landing / featured（留空走默认 product.liquid）"
+        />
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          推送到目标店铺时透传给 Shopify，决定使用哪个 product.&lt;suffix&gt;.liquid 模板。
+        </p>
+      </div>
       <p className="text-[10px] text-muted-foreground">
         注：Collections 关联在 Wave 后续接 collection_product 中间表，目前从 tags 推导
       </p>

@@ -14,6 +14,8 @@ export type Product = {
   published?: boolean;
   seoTitle?: string;
   seoDescription?: string;
+  /** Shopify product.template_suffix — product.<suffix>.liquid 模板匹配（V40） */
+  templateSuffix?: string | null;
   status: "active" | "draft" | "archived";
   createdAt?: string;
   updatedAt?: string;

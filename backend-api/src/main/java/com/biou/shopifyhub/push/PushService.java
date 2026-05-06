@@ -161,6 +161,11 @@ public class PushService {
         List<ProductImage> images = imageMapper.selectList(
             new QueryWrapper<ProductImage>().eq("product_id", productId).orderByAsc("position")
         );
+        // 本地 product_metafield 表是推送的 source-of-truth：由用户在 admin UI（产品详情页 RightPanel
+        // 的 MetafieldsCard）手编填入。
+        // AS3 worker 的 /pull/metafields 只拉 shop-level 落 R2 快照（不回写本地 product_metafield），
+        // 因此 pull 与 push 不构成双向同步；首次推送新产品到新店时，如果用户没在我们这边配过
+        // metafield，worker 端 metafieldsSet 调用就空跑，是预期行为而非 bug。
         List<ProductMetafield> metafields = metafieldMapper.selectList(
             new QueryWrapper<ProductMetafield>().eq("product_id", productId)
         );

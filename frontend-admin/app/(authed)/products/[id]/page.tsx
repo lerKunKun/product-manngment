@@ -101,11 +101,11 @@ export default function ProductDetailPage() {
         vendor: draft.vendor,
         type: draft.type,
         tags: draft.tags,
-        productCategory: draft.productCategory,
         status: draft.status,
         published: draft.status === "active",
         seoTitle: draft.seoTitle,
         seoDescription: draft.seoDescription,
+        templateSuffix: draft.templateSuffix ?? null,
       });
       setMsg("✓ 已保存");
       load();

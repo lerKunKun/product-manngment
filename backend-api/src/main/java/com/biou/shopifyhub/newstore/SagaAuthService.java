@@ -3,6 +3,7 @@ package com.biou.shopifyhub.newstore;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.biou.shopifyhub.core.security.AesGcmUtil;
 import com.biou.shopifyhub.store.ShopifyApiClient;
+import com.biou.shopifyhub.store.StoreService;
 import com.biou.shopifyhub.store.entity.Store;
 import com.biou.shopifyhub.store.mapper.StoreMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,6 +53,7 @@ public class SagaAuthService {
     private final StoreMapper storeMapper;
     private final ShopifyApiClient shopifyApiClient;
     private final ObjectMapper objectMapper;
+    private final StoreService storeService;
 
     @Value("${ENCRYPT_KEY_AES_GCM:}")
     private String aesKey;
@@ -71,11 +73,13 @@ public class SagaAuthService {
     public SagaAuthService(SagaService sagaService,
                            StoreMapper storeMapper,
                            ShopifyApiClient shopifyApiClient,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           StoreService storeService) {
         this.sagaService = sagaService;
         this.storeMapper = storeMapper;
         this.shopifyApiClient = shopifyApiClient;
         this.objectMapper = objectMapper;
+        this.storeService = storeService;
     }
 
     /**
@@ -216,6 +220,9 @@ public class SagaAuthService {
         s.setIsPartnerCollab(false);
         s.setStatus("ACTIVE");
         storeMapper.insert(s);
+        // AS1-03: saga 路径首次接入也触发全店静默资产同步（与 connectCustomApp 对齐）。
+        // saga 没有 JWT 主体（OAuth callback 是无登录态的），triggeredBy=null。
+        storeService.publishStoreConnected(s, null);
         return s.getId();
     }
 
