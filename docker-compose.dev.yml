@@ -124,8 +124,10 @@ services:
       MQ_USER: guest
       MQ_PASS: guest
       SHOPIFY_API_VERSION: "2024-10"
-      # backend SSE 进度回调（worker → backend）；backend 跑在 host 上时容器要走 host.docker.internal
-      BACKEND_PROGRESS_URL: http://host.docker.internal:8080/api/internal/asset
+      # backend SSE 进度回调（worker → backend）；backend 跑在 host 上时容器要走 host.docker.internal。
+      # 仅写 host:port，worker progress.py 内部已拼 /api/internal/asset/progress 路径；
+      # 写完整路径会被双拼成 /api/internal/asset/api/internal/asset/progress 而 404。
+      BACKEND_PROGRESS_URL: http://host.docker.internal:8080
       INTERNAL_API_TOKEN: dev-internal-token
     extra_hosts:
       - "host.docker.internal:host-gateway"
