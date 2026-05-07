@@ -273,7 +273,7 @@ export const messages = {
     "profile.dingtalk.unbound": "未绑定",
     "profile.dingtalk.boundOk": "✓ 钉钉已关联",
     "profile.dingtalk.bindFailed": "绑定失败：{reason}",
-    "profile.passwordMustChangeWarn": "⚠ 检测到您使用初始/临时密码，请立即在下方修改。",
+    "profile.passwordMustChangeWarn": "检测到您使用初始/临时密码，请立即在下方修改。",
     "profile.changePassword": "修改密码",
     "profile.password.old": "原密码",
     "profile.password.new": "新密码（≥ 8 位）",

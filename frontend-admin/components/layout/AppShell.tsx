@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Bell, Moon, Sun } from "lucide-react";
 import { useAuthStore } from "@/lib/auth/store";
 import { authApi } from "@/lib/api/auth";
 import { userApi } from "@/lib/api/user";
@@ -265,7 +266,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-label="切换主题"
               className="rounded-md border bg-background p-1.5 text-sm hover:bg-accent"
             >
-              {theme === "dark" ? "☀️" : "🌙"}
+              {theme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
             </button>
             <button
               type="button"
@@ -281,7 +286,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onClick={() => router.push("/inbox")}
               className="relative rounded-md border bg-background p-1.5 text-sm hover:bg-accent"
             >
-              <span aria-hidden>🔔</span>
+              <Bell className="h-4 w-4" aria-hidden />
               {unread > 0 && (
                 <span className="absolute -right-1 -top-1 inline-flex min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-medium leading-4 text-white">
                   {unread > 99 ? "99+" : unread}
