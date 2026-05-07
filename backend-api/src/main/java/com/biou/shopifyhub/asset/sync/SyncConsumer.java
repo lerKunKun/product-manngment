@@ -6,9 +6,11 @@ import com.biou.shopifyhub.store.ShopifyApiClient;
 import com.biou.shopifyhub.store.StoreService;
 import com.biou.shopifyhub.store.entity.Store;
 import com.biou.shopifyhub.store.mapper.StoreMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -79,6 +81,33 @@ public class SyncConsumer {
         this.storeService = storeService;
         this.shopifyApiClient = shopifyApiClient;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * 启动时把所有遗留 RUNNING / PENDING 的 FULL snapshot 标 FAILED。
+     *
+     * <p>SyncConsumer 处理消息时会把 asset_snapshot 行先 mark RUNNING 再调 worker。
+     * 如果 backend 在 worker 调用过程中被 kill / 重启，RabbitMQ 已经 ack 掉那条消息
+     * （不重投递，at-most-once 设计），表行就永远卡 RUNNING / PENDING — 前端徽章
+     * 永远显示"同步中"。这里在启动时把孤儿一次性扫掉，让用户能再点"重新同步"。
+     */
+    @PostConstruct
+    void closeOrphanedRunning() {
+        try {
+            AssetSnapshot patch = new AssetSnapshot();
+            patch.setStatus("FAILED");
+            patch.setCompletedAt(LocalDateTime.now());
+            patch.setErrorMessage("backend restarted while RUNNING/PENDING; orphaned snapshot, please trigger resync");
+            int n = snapshotMapper.update(patch,
+                new LambdaQueryWrapper<AssetSnapshot>()
+                    .eq(AssetSnapshot::getSnapshotType, "FULL")
+                    .in(AssetSnapshot::getStatus, "RUNNING", "PENDING"));
+            if (n > 0) {
+                log.warn("[asset-sync] startup: marked {} orphan FULL snapshots FAILED (backend was killed mid-sync)", n);
+            }
+        } catch (Exception e) {
+            log.warn("[asset-sync] startup orphan cleanup failed: {}", e.getMessage());
+        }
     }
 
     @RabbitListener(queues = AssetSyncMqConfig.FULL_STORE_QUEUE)
