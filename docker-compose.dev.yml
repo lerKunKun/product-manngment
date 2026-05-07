@@ -114,11 +114,16 @@ services:
       APP_PORT: "9000"
       APP_ENV: dev
       ASSET_WORKER_TOKEN: dev-worker-token
-      R2_ENDPOINT: http://minio:9000
-      R2_ACCESS_KEY_ID: minioadmin
-      R2_SECRET_ACCESS_KEY: minioadmin
-      R2_BUCKET: shopify-assets-dev
-      R2_PUBLIC_BASE: http://localhost:9000/shopify-assets-dev-public
+      # R2 配置：读宿主机 .env，与 backend (dev-backend.sh 同样读 .env) 保持同源。
+      # 缺省时回落到本地 MinIO，方便没真 R2 凭证的人跑通 dev。
+      # 若 .env 里 R2_ENDPOINT 是真 cloudflare，这里 worker 会直接写真 R2，
+      # backend 也读真 R2 → 数据一致；以前 worker 走 minio / backend 走 R2
+      # 会让"文件列表 (0)"虚假为空。
+      R2_ENDPOINT: ${R2_ENDPOINT:-http://minio:9000}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-minioadmin}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-minioadmin}
+      R2_BUCKET: ${R2_BUCKET:-shopify-assets-dev}
+      R2_PUBLIC_BASE: ${R2_PUBLIC_BASE:-http://localhost:9000/shopify-assets-dev-public}
       MQ_HOST: rabbitmq
       MQ_PORT: "5672"
       MQ_USER: guest
