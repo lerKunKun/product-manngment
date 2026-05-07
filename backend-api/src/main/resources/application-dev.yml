@@ -120,7 +120,9 @@ shopify:
     debounce-seconds: ${SHOPIFY_SNAPSHOT_DEBOUNCE_SECONDS:300}
   worker:
     base-url: ${SHOPIFY_WORKER_BASE_URL:http://localhost:8765}
-    call-timeout-seconds: ${SHOPIFY_WORKER_TIMEOUT_SECONDS:120}
+    # 主题文件多 / 大店产品图多时 120s 不够；提高到 600s 顶过去；
+    # 异步流式拉取留到 Wave 3b 断点续传 Track 一并改造。
+    call-timeout-seconds: ${SHOPIFY_WORKER_TIMEOUT_SECONDS:600}
   # W2-SYNC-02: 04:00 全店全产品兜底扫 cron（dev 同生产；秒 分 时 日 月 周）
   sync:
     full-cron: ${SHOPIFY_SYNC_FULL_CRON:0 0 4 * * *}

@@ -58,8 +58,9 @@ query files($cursor: String) {
         }
         ... on MediaImage {
           mediaContentType
+          mimeType
           image { url width height }
-          originalSource { fileSize url mimeType }
+          originalSource { fileSize url }
           preview { image { url } }
         }
         ... on Video {
@@ -135,6 +136,8 @@ def _pick_download(node: dict) -> tuple[Optional[str], Optional[str]]:
         url = image["url"]
 
     # Fall back to originalSource for image/video where image.url isn't populated.
+    # MediaImageOriginalSource schema: { fileSize, url } — no mimeType field;
+    # use the parent MediaImage.mimeType instead. VideoSource schema does have mimeType.
     original = node.get("originalSource")
     if isinstance(original, dict):
         if not url and isinstance(original.get("url"), str) and original["url"]:
@@ -142,6 +145,12 @@ def _pick_download(node: dict) -> tuple[Optional[str], Optional[str]]:
         ct_orig = original.get("mimeType")
         if isinstance(ct_orig, str) and ct_orig:
             ct = ct_orig
+
+    # Top-level MediaImage.mimeType (newly queried).
+    if not ct:
+        node_mt = node.get("mimeType")
+        if isinstance(node_mt, str) and node_mt:
+            ct = node_mt
 
     return url, ct
 

@@ -9,13 +9,17 @@ arrives in later waves.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT_SECONDS = 30.0
+# 单次 Shopify Admin REST/GraphQL 调用 timeout。
+# theme assets 列表可能上百个 endpoint 串行翻页 → 单查询 30s 偶尔触顶；
+# 提到 60s 默认。可由 SHOPIFY_ADMIN_TIMEOUT_SECONDS 覆盖。
+_DEFAULT_TIMEOUT_SECONDS = float(os.environ.get("SHOPIFY_ADMIN_TIMEOUT_SECONDS", "60"))
 
 
 class ShopifyAdminError(Exception):
