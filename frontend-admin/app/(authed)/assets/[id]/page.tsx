@@ -1,16 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { AlertTriangle } from "lucide-react";
 import {
   assetSnapshotApi,
   humanBytes,
   STATUS_BADGE,
   type AssetSnapshotDetail,
 } from "@/lib/api/snapshot";
+import {
+  assetApi,
+  parseSyncErrors,
+  type SnapshotManifests,
+} from "@/lib/api/asset";
 import { LoadingBlock, ErrorBanner, EmptyState } from "@/components/ui/StatusBlocks";
 import { useToast } from "@/components/ui/Toast";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
+
+const SEGMENT_LABEL: Record<string, string> = {
+  theme: "主题",
+  product: "产品",
+  shop_settings: "店铺设置",
+  metafields: "Metafields",
+  files: "文件库",
+  menu: "菜单",
+  policy: "政策",
+  collection: "集合",
+};
+
+type FlatEntry = {
+  segment: string;
+  relativePath: string;
+  sha256: string;
+  size?: number;
+  contentType?: string | null;
+};
 
 export default function AssetSnapshotDetailPage() {
   const params = useParams<{ id: string }>();
@@ -20,6 +45,11 @@ export default function AssetSnapshotDetailPage() {
   const [d, setD] = useState<AssetSnapshotDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  /** AS3 之后 worker 按段写 manifest.json，不再回写 asset_file 表，
+   *  详情页改用 /manifests 一次拿所有段，前端展平显示。 */
+  const [manifests, setManifests] = useState<SnapshotManifests | null>(null);
+  const [manifestsLoading, setManifestsLoading] = useState(false);
 
   const [manifest, setManifest] = useState<unknown>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
@@ -35,7 +65,37 @@ export default function AssetSnapshotDetailPage() {
     } finally {
       setLoading(false);
     }
+    setManifestsLoading(true);
+    try {
+      const m = await assetApi.manifests(id);
+      setManifests(m);
+    } catch {
+      // 段未生成（早期 snapshot 或 RUNNING 中）— 不报错，下方显示 fallback
+    } finally {
+      setManifestsLoading(false);
+    }
   }
+
+  /** 展平 segments → [{segment, relativePath, sha256, size, contentType}] */
+  const flatEntries: FlatEntry[] = useMemo(() => {
+    if (!manifests?.segments) return [];
+    const out: FlatEntry[] = [];
+    for (const [seg, data] of Object.entries(manifests.segments)) {
+      const entries = (data.entries as
+        | { relative_path: string; sha256: string; size?: number; content_type?: string | null }[]
+        | undefined) ?? [];
+      for (const e of entries) {
+        out.push({
+          segment: seg,
+          relativePath: e.relative_path,
+          sha256: e.sha256,
+          size: e.size,
+          contentType: e.content_type,
+        });
+      }
+    }
+    return out;
+  }, [manifests]);
 
   async function loadManifest() {
     setManifestLoading(true);
@@ -78,14 +138,35 @@ export default function AssetSnapshotDetailPage() {
         <span className="rounded border bg-muted px-2 py-0.5 text-xs">{d.snapshotType}</span>
       </div>
 
-      {d.status === "FAILED" && d.errorMessage && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
-          <div className="font-medium">失败原因</div>
-          <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-xs">
-            {d.errorMessage}
-          </pre>
-        </div>
-      )}
+      {(d.status === "FAILED" || d.status === "PARTIAL") && d.errorMessage && (() => {
+        const errs = parseSyncErrors(d.errorMessage);
+        const isPartial = d.status === "PARTIAL";
+        const cls = isPartial
+          ? "border-amber-200 bg-amber-50 text-amber-900"
+          : "border-red-200 bg-red-50 text-red-900";
+        return (
+          <section className={`rounded-md border p-3 text-sm ${cls}`}>
+            <div className="mb-2 flex items-center gap-1.5 font-medium">
+              <AlertTriangle className="h-4 w-4" />
+              {isPartial ? `失败子任务（${errs.length}）` : "失败原因"}
+            </div>
+            {errs.length > 0 ? (
+              <ul className="space-y-1.5 text-xs">
+                {errs.map((e, i) => (
+                  <li key={i} className="rounded bg-white/60 p-2">
+                    <div className="font-mono font-semibold">{e.label}</div>
+                    <div className="mt-0.5 break-all">{e.detail}</div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <pre className="whitespace-pre-wrap break-words font-mono text-xs">
+                {d.errorMessage}
+              </pre>
+            )}
+          </section>
+        );
+      })()}
 
       <section className="rounded-lg border bg-background p-4 text-sm">
         <h2 className="mb-3 font-medium">元数据</h2>
@@ -112,7 +193,9 @@ export default function AssetSnapshotDetailPage() {
 
       <section className="rounded-lg border bg-background p-4 text-sm">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-medium">文件列表 ({d.files?.length ?? 0})</h2>
+          <h2 className="font-medium">
+            文件列表 ({flatEntries.length || d.files?.length || 0})
+          </h2>
           <button
             onClick={() => {
               navigator.clipboard.writeText(d.r2Prefix ?? "");
@@ -124,9 +207,45 @@ export default function AssetSnapshotDetailPage() {
             复制 prefix
           </button>
         </div>
-        {!d.files || d.files.length === 0 ? (
-          <EmptyState title="暂无文件" hint="可能尚未生成完成或快照失败" />
-        ) : (
+        {manifestsLoading ? (
+          <div className="py-3 text-center text-xs text-muted-foreground">
+            正在读取各段 manifest...
+          </div>
+        ) : flatEntries.length > 0 ? (
+          <div className="overflow-auto rounded border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-1.5 text-left">段</th>
+                  <th className="px-2 py-1.5 text-left">路径</th>
+                  <th className="px-2 py-1.5 text-left">MIME</th>
+                  <th className="px-2 py-1.5 text-right">大小</th>
+                  <th className="px-2 py-1.5 text-left">SHA-256</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flatEntries.map((e, i) => (
+                  <tr key={i} className="border-t hover:bg-muted/30">
+                    <td className="px-2 py-1.5 text-xs">
+                      <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                        {SEGMENT_LABEL[e.segment] ?? e.segment}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5 font-mono text-xs">{e.relativePath}</td>
+                    <td className="px-2 py-1.5 text-xs text-muted-foreground">
+                      {e.contentType || "-"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">{humanBytes(e.size)}</td>
+                    <td className="px-2 py-1.5 font-mono text-[10px] text-muted-foreground" title={e.sha256}>
+                      {e.sha256 ? e.sha256.substring(0, 12) + "…" : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : d.files && d.files.length > 0 ? (
+          // 老快照（pre-AS2）asset_file 表回退展示
           <div className="overflow-auto rounded border">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
@@ -153,6 +272,15 @@ export default function AssetSnapshotDetailPage() {
               </tbody>
             </table>
           </div>
+        ) : (
+          <EmptyState
+            title="暂无文件"
+            hint={
+              d.status === "RUNNING" || d.status === "PENDING"
+                ? "尚未完成同步"
+                : "该快照所有段都没成功（看上方失败原因），或 backend 未重启使新 endpoint 生效"
+            }
+          />
         )}
       </section>
 
