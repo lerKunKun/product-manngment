@@ -247,4 +247,45 @@ public class AssetSnapshotController {
             return Result.error(500, "manifest load failed: " + e.getMessage());
         }
     }
+
+    /** AS3 之后 FULL 同步按段写 manifest（theme / product / shop_settings / metafields / files），
+     *  本 endpoint 一次性返回所有存在的段，缺的段不报错。前端 SyncDetailDialog 用。 */
+    @GetMapping("/{id}/manifests")
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
+    public Result<Map<String, Object>> manifests(@PathVariable Long id) {
+        AssetSnapshot snap = snapshotMapper.selectById(id);
+        if (snap == null) {
+            return Result.error(404, "snapshot not found: " + id);
+        }
+        String prefix = snap.getR2Prefix();
+        if (prefix == null || prefix.isBlank()) {
+            return Result.error(404, "snapshot has no r2Prefix yet (status=" + snap.getStatus() + ")");
+        }
+        if (!prefix.endsWith("/")) prefix = prefix + "/";
+
+        Map<String, Object> segments = new LinkedHashMap<>();
+        for (String seg : List.of("theme", "product", "shop_settings", "metafields", "files",
+                                  "menu", "policy", "collection")) {
+            String key = prefix + seg + "/manifest.json";
+            try {
+                byte[] data = fileService.downloadBytes(key);
+                Map<String, Object> parsed = objectMapper.readValue(data,
+                    new TypeReference<Map<String, Object>>() {});
+                segments.put(seg, parsed);
+            } catch (Exception e) {
+                // 段缺失 = 该段没成功同步；不报错，前端按段渲染时知道是 missing
+                log.debug("asset-snapshot manifest segment missing id={} seg={} err={}",
+                    id, seg, e.getMessage());
+            }
+        }
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("snapshotId", id);
+        resp.put("r2Prefix", prefix);
+        resp.put("status", snap.getStatus());
+        resp.put("fileCount", snap.getFileCount());
+        resp.put("totalBytes", snap.getTotalBytes());
+        resp.put("errorMessage", snap.getErrorMessage());
+        resp.put("segments", segments);
+        return Result.ok(resp);
+    }
 }

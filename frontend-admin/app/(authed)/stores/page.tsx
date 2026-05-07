@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Eye, Globe, Loader2, Settings2 } from "lucide-react";
+import { Clock, Eye, Globe, Loader2, Settings2 } from "lucide-react";
 import {
   storeApi,
   type StoreItem,
@@ -19,6 +19,7 @@ import {
 import { useStores, useInvalidateStores } from "@/lib/queries/stores";
 import { useToast } from "@/components/ui/Toast";
 import { DropdownMenu, DropdownItem } from "@/components/ui/DropdownMenu";
+import { SyncDetailDialog } from "@/components/asset/SyncDetailDialog";
 import { useI18n } from "@/lib/i18n/context";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import type { MessageKey } from "@/lib/i18n/messages";
@@ -210,6 +211,7 @@ export default function StoresPage() {
   }, [stores, latestSnaps.map((q) => q.data?.latest?.status).join("|")]);
 
   const [resyncing, setResyncing] = useState<Record<number, boolean>>({});
+  const [detailSnapshotStoreId, setDetailSnapshotStoreId] = useState<number | null>(null);
   async function onResync(s: StoreItem) {
     setResyncing((m) => ({ ...m, [s.id]: true }));
     try {
@@ -524,18 +526,34 @@ export default function StoresPage() {
                       ? `startedAt: ${latest.startedAt}`
                       : "",
                   ].filter(Boolean);
+                  const clickable =
+                    !!latest && (key === "PARTIAL" || key === "FAILED" || key === "SUCCESS");
                   return (
                     <div className="mt-3 flex items-center justify-between gap-2">
-                      <span
-                        title={titleParts.join("\n")}
-                        className={
-                          "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium " +
-                          info.cls
-                        }
-                      >
-                        {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {t(info.i18nKey)}
-                      </span>
+                      {clickable ? (
+                        <button
+                          type="button"
+                          onClick={() => setDetailSnapshotStoreId(s.id)}
+                          title={[...titleParts, "点击查看详情"].join("\n")}
+                          className={
+                            "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium hover:opacity-80 " +
+                            info.cls
+                          }
+                        >
+                          {t(info.i18nKey)}
+                        </button>
+                      ) : (
+                        <span
+                          title={titleParts.join("\n")}
+                          className={
+                            "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium " +
+                            info.cls
+                          }
+                        >
+                          {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                          {t(info.i18nKey)}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => onResync(s)}
@@ -558,7 +576,7 @@ export default function StoresPage() {
                       tokenBadgeClass(days, s.tokenType)
                     }
                   >
-                    <span aria-hidden>⏱</span>
+                    <Clock className="h-3 w-3" aria-hidden />
                     {tokenBadgeText(days, s.tokenType)}
                   </span>
                   <div className="flex items-center gap-1">
@@ -634,6 +652,16 @@ export default function StoresPage() {
           })}
         </div>
       )}
+
+      <SyncDetailDialog
+        open={detailSnapshotStoreId !== null}
+        onClose={() => setDetailSnapshotStoreId(null)}
+        snapshot={
+          detailSnapshotStoreId !== null
+            ? latestByStoreId[detailSnapshotStoreId] ?? null
+            : null
+        }
+      />
     </div>
   );
 }
