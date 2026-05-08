@@ -14,6 +14,7 @@ import {
 } from "@/lib/api/notification";
 import { useI18n } from "@/lib/i18n/context";
 import { useToast } from "@/components/ui/Toast";
+import { UnbindDingtalkDialog } from "./_components/UnbindDingtalkDialog";
 
 export default function ProfilePage() {
   const { t } = useI18n();
@@ -28,6 +29,9 @@ export default function ProfilePage() {
   const [confirmPwd, setConfirmPwd] = useState("");
   const [pwdMsg, setPwdMsg] = useState("");
   const [pwdBusy, setPwdBusy] = useState(false);
+
+  // 解绑钉钉对话框（含钉钉验证码 + 设置新密码）
+  const [unbindOpen, setUnbindOpen] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -107,6 +111,10 @@ export default function ProfilePage() {
     }
   }
 
+  function startUnbindDingtalk() {
+    setUnbindOpen(true);
+  }
+
   return (
     <div className="max-w-2xl space-y-6">
       <h1 className="text-2xl font-semibold">{t("profile.title")}</h1>
@@ -132,6 +140,7 @@ export default function ProfilePage() {
           <Row label={t("profile.field.position")} value={me.position ?? "-"} />
           <Row label={t("profile.field.username")} value={me.username} />
           <Row label={t("profile.field.email")} value={me.email || "-"} />
+          <Row label="电话" value={me.phone || "-"} />
           <Row
             label={t("profile.field.userType")}
             value={me.userType === "TEMP" ? t("profile.userType.temp") : t("profile.userType.full")}
@@ -147,7 +156,16 @@ export default function ProfilePage() {
             label={t("profile.field.dingtalkBound")}
             value={
               me.dingtalkUserId ? (
-                t("profile.dingtalk.bound")
+                <span className="inline-flex items-center gap-2">
+                  <span>{t("profile.dingtalk.bound")}</span>
+                  <button
+                    type="button"
+                    onClick={startUnbindDingtalk}
+                    className="rounded-md border border-red-200 bg-background px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50"
+                  >
+                    解绑
+                  </button>
+                </span>
               ) : (
                 <span className="inline-flex items-center gap-2">
                   <span>{t("profile.dingtalk.unbound")}</span>
@@ -218,6 +236,15 @@ export default function ProfilePage() {
 
       <SessionsSection />
       <SubscriptionSection />
+
+      <UnbindDingtalkDialog
+        open={unbindOpen}
+        onClose={() => setUnbindOpen(false)}
+        onUnbound={() => {
+          setUnbindOpen(false);
+          load();
+        }}
+      />
     </div>
   );
 }

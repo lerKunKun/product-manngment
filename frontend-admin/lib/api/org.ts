@@ -17,6 +17,8 @@ export type OrgTreeNode = {
   parentId?: number;
   type?: string;
   dingtalkDeptId?: number | string;
+  /** 本节点直接挂的去重员工数（不含子孙）。前端聚合 self+desc 得整树员工数。 */
+  userCount?: number;
   children?: OrgTreeNode[];
   // 后端 service.tree() 返回 List<Map<String, Object>>，字段以实际为准；
   // 这里给一个兜底类型，渲染时 fallback 到 (it as any).xxx

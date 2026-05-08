@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     r2_bucket: str = "shopify-assets-dev"
     r2_public_base: str = "http://localhost:9000/shopify-assets-dev"
     r2_region: str = "auto"
+    # Startup bucket bootstrap. Default on so missing-bucket misconfigurations
+    # surface immediately as a fatal startup error instead of as a confusing
+    # `IOException: header parser received no bytes` mid-sync.
+    r2_bucket_ensure: bool = True
 
     # MQ
     mq_host: str = "localhost"

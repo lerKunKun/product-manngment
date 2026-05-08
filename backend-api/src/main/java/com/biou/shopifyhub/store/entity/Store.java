@@ -35,9 +35,11 @@ public class Store {
 
     /** V31: Shopify 套餐 plan_name（shop.json 拉到） */
     private String shopifyPlan;
-    /** V31: 近 30 天 paid 订单 GMV */
+    /** V31: 近 30 天 paid 订单 GMV。MyBatis-Plus 驼峰转下划线不会在数字前插 `_`，必须显式映射列名。 */
+    @TableField("gmv_30d")
     private java.math.BigDecimal gmv30d;
-    /** V31: 近 30 天 paid 订单数 */
+    /** V31: 近 30 天 paid 订单数。同上，显式映射避免 `order_count30d` ≠ DB `order_count_30d`。 */
+    @TableField("order_count_30d")
     private Integer orderCount30d;
     /** V31: 订单本币 ISO 4217 */
     private String metricsCurrency;

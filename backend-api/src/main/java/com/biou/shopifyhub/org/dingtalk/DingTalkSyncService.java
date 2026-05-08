@@ -3,9 +3,13 @@ package com.biou.shopifyhub.org.dingtalk;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.biou.shopifyhub.auth.dingtalk.DingTalkApiClient;
 import com.biou.shopifyhub.core.ResultCode;
+import com.biou.shopifyhub.core.entity.SysRole;
 import com.biou.shopifyhub.core.entity.SysUser;
+import com.biou.shopifyhub.core.entity.SysUserRole;
 import com.biou.shopifyhub.core.exception.BusinessException;
+import com.biou.shopifyhub.core.mapper.SysRoleMapper;
 import com.biou.shopifyhub.core.mapper.SysUserMapper;
+import com.biou.shopifyhub.core.mapper.SysUserRoleMapper;
 import com.biou.shopifyhub.org.entity.DingtalkSyncLog;
 import com.biou.shopifyhub.org.entity.SysOrg;
 import com.biou.shopifyhub.org.mapper.DingtalkSyncLogMapper;
@@ -61,17 +65,23 @@ public class DingTalkSyncService {
     private final DingTalkApiClient dingApi;
     private final SysOrgMapper orgMapper;
     private final SysUserMapper userMapper;
+    private final SysUserRoleMapper userRoleMapper;
+    private final SysRoleMapper roleMapper;
     private final DingtalkSyncLogMapper logMapper;
 
     public DingTalkSyncService(DingTalkConfigService configService,
                                DingTalkApiClient dingApi,
                                SysOrgMapper orgMapper,
                                SysUserMapper userMapper,
+                               SysUserRoleMapper userRoleMapper,
+                               SysRoleMapper roleMapper,
                                DingtalkSyncLogMapper logMapper) {
         this.configService = configService;
         this.dingApi = dingApi;
         this.orgMapper = orgMapper;
         this.userMapper = userMapper;
+        this.userRoleMapper = userRoleMapper;
+        this.roleMapper = roleMapper;
         this.logMapper = logMapper;
     }
 
@@ -158,9 +168,14 @@ public class DingTalkSyncService {
                     : findLocalIdByDeptId(parentDeptId, orgId);
                 if (localParentId == null) localParentId = orgId; // 兜底挂 COMPANY
 
-                SysOrg local = orgMapper.selectOne(new QueryWrapper<SysOrg>()
-                    .eq("dingtalk_dept_id", deptId)
-                    .eq("tenant_id", tenantId));
+                // tenantId 可能为 null（COMPANY 节点未填 tenant_id 时）。MyBatis-Plus 的 .eq("col", null)
+                // 生成的是 col = NULL（永远 false），不是 col IS NULL —— 必须分支处理，否则永远命不中已存在记录，
+                // 走到 INSERT 撞 sys_org.code unique 约束。
+                QueryWrapper<SysOrg> findExisting = new QueryWrapper<SysOrg>()
+                    .eq("dingtalk_dept_id", deptId);
+                if (tenantId == null) findExisting.isNull("tenant_id");
+                else findExisting.eq("tenant_id", tenantId);
+                SysOrg local = orgMapper.selectOne(findExisting);
                 if (local == null) {
                     SysOrg n = new SysOrg();
                     n.setName(name == null || name.isBlank() ? ("钉钉部门-" + deptId) : name);
@@ -194,11 +209,13 @@ public class DingTalkSyncService {
             }
 
             // 2) 软删除：本地 dept 存在但钉钉已删除
-            List<SysOrg> localDepts = orgMapper.selectList(new QueryWrapper<SysOrg>()
-                .eq("tenant_id", tenantId)
+            QueryWrapper<SysOrg> qLocalDepts = new QueryWrapper<SysOrg>()
                 .eq("type", "DEPT")
                 .eq("dingtalk_corp_id", cfg.corpId())
-                .isNotNull("dingtalk_dept_id"));
+                .isNotNull("dingtalk_dept_id");
+            if (tenantId == null) qLocalDepts.isNull("tenant_id");
+            else qLocalDepts.eq("tenant_id", tenantId);
+            List<SysOrg> localDepts = orgMapper.selectList(qLocalDepts);
             for (SysOrg d : localDepts) {
                 if (!remoteDeptIds.contains(d.getDingtalkDeptId())) {
                     orgMapper.deleteById(d.getId()); // logic delete (deleted_at=NOW())
@@ -239,6 +256,25 @@ public class DingTalkSyncService {
         logRow.setStartedAt(LocalDateTime.now());
         int added = 0, skipped = 0, failed = 0;
         StringBuilder err = new StringBuilder();
+        // 诊断用：每个部门「成功 / 跳过原因」明细，最后写 sync_log.error_msg
+        // 即使整次同步成功，也把每个部门的拉取结果写进去，方便排查"为什么只拉到 1 个人"。
+        int deptOk = 0, deptSkippedNoPerm = 0, deptEmpty = 0;
+        java.util.Map<String, String> deptDiag = new java.util.LinkedHashMap<>();
+
+        // 关联用：把 sys_user 与 sys_user_role 建上 (org_id=本地部门 id, role_id=EMPLOYEE)。
+        // 没有 link 时前端按组织过滤就拉不到人 —— 这是 G3 用户/组织未关联的根因。
+        Long employeeRoleId;
+        {
+            SysRole employee = roleMapper.selectOne(
+                new QueryWrapper<SysRole>().eq("code", "EMPLOYEE"));
+            if (employee == null) {
+                throw new BusinessException(ResultCode.DEPENDENCY_DOWN,
+                    "默认角色 EMPLOYEE 不存在（V2 seed 缺失？）");
+            }
+            employeeRoleId = employee.getId();
+        }
+        // 同步内累计「新建 user_role」「跳过已存在」「失败」计数，写到诊断
+        int userRoleAdded = 0, userRoleExisting = 0;
 
         try {
             SysOrg companyOrg = orgMapper.selectById(orgId);
@@ -248,17 +284,28 @@ public class DingTalkSyncService {
             Long tenantId = companyOrg.getTenantId();
 
             // 拿当前组织下所有 dept dingtalk id（包含 root=1）
-            List<SysOrg> depts = orgMapper.selectList(new QueryWrapper<SysOrg>()
-                .eq("tenant_id", tenantId)
+            // 同 syncDepartments：tenantId 可能为 null，必须分支用 isNull，否则查空 → 用户同步只对 root 跑一次。
+            QueryWrapper<SysOrg> qDepts = new QueryWrapper<SysOrg>()
                 .eq("type", "DEPT")
                 .eq("dingtalk_corp_id", cfg.corpId())
-                .isNotNull("dingtalk_dept_id"));
+                .isNotNull("dingtalk_dept_id");
+            if (tenantId == null) qDepts.isNull("tenant_id");
+            else qDepts.eq("tenant_id", tenantId);
+            List<SysOrg> depts = orgMapper.selectList(qDepts);
             Set<String> deptIds = new HashSet<>();
             deptIds.add("1");
             for (SysOrg d : depts) deptIds.add(d.getDingtalkDeptId());
+            // 钉钉 dept_id → 本地 sys_org.id 的快速 map（避免每个 user 走 SQL）
+            java.util.Map<String, Long> dingDeptToLocal = new HashMap<>();
+            dingDeptToLocal.put("1", orgId); // root 映射到 COMPANY 自身
+            for (SysOrg d : depts) dingDeptToLocal.put(d.getDingtalkDeptId(), d.getId());
 
             for (String deptId : deptIds) {
                 long cursor = 0;
+                int deptUsersFetched = 0;
+                int deptUsersAdded = 0;
+                int deptUsersSkipped = 0;
+                String deptSkipReason = null;
                 while (true) {
                     String body = "{\"dept_id\":" + deptId + ",\"cursor\":" + cursor + ",\"size\":50}";
                     JsonNode resp = postDingtalk(USER_LIST_URL + token, body);
@@ -266,50 +313,148 @@ public class DingTalkSyncService {
                     if (errcode != 0) {
                         String msg = resp.path("errmsg").asText("user list failed");
                         log.warn("[dingtalk-sync] user list dept={} errcode={} msg={}", deptId, errcode, msg);
-                        if (errcode == 60003 || errcode == 88) break; // 跳过此部门
+                        if (errcode == 60003 || errcode == 88) {
+                            deptSkippedNoPerm++;
+                            deptSkipReason = "errcode=" + errcode + " " + msg;
+                            break; // 跳过此部门
+                        }
                         throw new BusinessException(ResultCode.DEPENDENCY_DOWN,
                             "钉钉 user_list 失败 errcode=" + errcode + " msg=" + msg);
                     }
                     JsonNode result = resp.path("result");
+                    Long localDeptId = dingDeptToLocal.get(deptId);
                     for (JsonNode u : result.path("list")) {
+                        deptUsersFetched++;
                         String unionId = u.path("unionid").asText(null);
                         String userid = u.path("userid").asText(null);
                         String name = u.path("name").asText("");
                         String mobile = u.path("mobile").asText(null);
                         String email = u.path("email").asText(null);
+                        // v2 user/list 同时返回这些（之前漏读 → 头像 / 工号 / 职位都没存）
+                        String avatar = u.path("avatar").asText(null);
+                        String jobNumber = u.path("job_number").asText(null);
+                        String title = u.path("title").asText(null);
                         if (unionId == null || unionId.isBlank()) {
                             skipped++;
+                            deptUsersSkipped++;
                             continue;
                         }
                         SysUser exists = userMapper.selectOne(new QueryWrapper<SysUser>()
                             .eq("dingtalk_unionid", unionId));
+                        Long resolvedUserId;
                         if (exists != null) {
-                            // unionId 已存在：**不覆盖**，仅 skip + log
+                            // unionId 已存在：**只更新可变 profile 字段**（avatar/phone/email/title）；
+                            // username/employeeNo 不覆盖（保护本地登录名 + HR 工号）。
+                            // 仍要补 user_role 关联（之前漏建导致组织过滤拉不到人）。
+                            SysUser patch = new SysUser();
+                            patch.setId(exists.getId());
+                            boolean dirty = false;
+                            if (notBlank(avatar) && !avatar.equals(exists.getAvatarUrl())) {
+                                patch.setAvatarUrl(avatar); dirty = true;
+                            }
+                            if (notBlank(mobile) && !mobile.equals(exists.getPhone())) {
+                                patch.setPhone(mobile); dirty = true;
+                            }
+                            if (notBlank(email) && !email.equals(exists.getEmail())) {
+                                patch.setEmail(email); dirty = true;
+                            }
+                            if (notBlank(title) && !title.equals(exists.getPosition())) {
+                                patch.setPosition(title); dirty = true;
+                            }
+                            // 占位用户名 dt_xxx 时用钉钉 name 回填
+                            if (notBlank(name)
+                                && (exists.getUsername() == null || exists.getUsername().startsWith("dt_"))
+                                && !name.equals(exists.getUsername())) {
+                                patch.setUsername(name); dirty = true;
+                            }
+                            // employeeNo 仅本地空时回填
+                            if (notBlank(jobNumber)
+                                && (exists.getEmployeeNo() == null || exists.getEmployeeNo().isBlank())
+                                && !jobNumber.equals(exists.getEmployeeNo())) {
+                                patch.setEmployeeNo(jobNumber); dirty = true;
+                            }
+                            if (dirty) userMapper.updateById(patch);
                             skipped++;
-                            log.info("[dingtalk-sync] user skip (unionId exists) unionId={} localId={}",
-                                unionId, exists.getId());
-                            continue;
+                            deptUsersSkipped++;
+                            resolvedUserId = exists.getId();
+                            log.info("[dingtalk-sync] user exists unionId={} localId={} profileDirty={}",
+                                unionId, exists.getId(), dirty);
+                        } else {
+                            SysUser n = new SysUser();
+                            n.setUsername(notBlank(name) ? name : ("dt_" + userid));
+                            n.setEmployeeNo(notBlank(jobNumber) ? jobNumber : userid);
+                            n.setEmail(email);
+                            n.setPhone(mobile);
+                            n.setAvatarUrl(avatar);
+                            n.setPosition(title);
+                            n.setDingtalkUnionid(unionId);
+                            n.setDingtalkUserid(userid);
+                            n.setDingtalkCorpId(cfg.corpId());
+                            n.setDefaultTenantId(tenantId);
+                            n.setUserType("STAFF");
+                            n.setStatus("ACTIVE");
+                            n.setPasswordMustChange(true);
+                            userMapper.insert(n);
+                            added++;
+                            deptUsersAdded++;
+                            resolvedUserId = n.getId();
                         }
-                        SysUser n = new SysUser();
-                        n.setUsername(name != null && !name.isBlank() ? name : ("dt_" + userid));
-                        n.setEmployeeNo(userid);
-                        n.setEmail(email);
-                        n.setPhone(mobile);
-                        n.setDingtalkUnionid(unionId);
-                        n.setDingtalkUserid(userid);
-                        n.setDingtalkCorpId(cfg.corpId());
-                        n.setDefaultTenantId(tenantId);
-                        n.setUserType("STAFF");
-                        n.setStatus("ACTIVE");
-                        n.setPasswordMustChange(true);
-                        userMapper.insert(n);
-                        added++;
+                        // 建 user_role 关联：(user, EMPLOYEE 角色, 当前部门)，已存在跳过
+                        if (localDeptId != null && resolvedUserId != null) {
+                            Long existsRel = userRoleMapper.selectCount(
+                                new QueryWrapper<SysUserRole>()
+                                    .eq("user_id", resolvedUserId)
+                                    .eq("role_id", employeeRoleId)
+                                    .eq("org_id", localDeptId));
+                            if (existsRel == null || existsRel == 0) {
+                                SysUserRole ur = new SysUserRole();
+                                ur.setUserId(resolvedUserId);
+                                ur.setRoleId(employeeRoleId);
+                                ur.setOrgId(localDeptId);
+                                ur.setCreatedAt(LocalDateTime.now());
+                                userRoleMapper.insert(ur);
+                                userRoleAdded++;
+                            } else {
+                                userRoleExisting++;
+                            }
+                        }
                     }
                     boolean hasMore = result.path("has_more").asBoolean(false);
                     if (!hasMore) break;
                     cursor = result.path("next_cursor").asLong(0);
                     if (cursor == 0) break;
                 }
+                if (deptSkipReason != null) {
+                    deptDiag.put(deptId, "SKIP " + deptSkipReason);
+                } else if (deptUsersFetched == 0) {
+                    deptOk++;
+                    deptEmpty++;
+                    deptDiag.put(deptId, "EMPTY");
+                } else {
+                    deptOk++;
+                    deptDiag.put(deptId, "OK fetched=" + deptUsersFetched
+                        + " added=" + deptUsersAdded + " skipped=" + deptUsersSkipped);
+                }
+                log.info("[dingtalk-sync] user list dept={} fetched={} added={} skipped={} skipReason={}",
+                    deptId, deptUsersFetched, deptUsersAdded, deptUsersSkipped, deptSkipReason);
+            }
+            // 总览写到 errorMsg（即使没失败）
+            String summary = String.format(
+                "depts total=%d ok=%d empty=%d skipped(no-perm)=%d | users added=%d skipped=%d | user_role added=%d existing=%d",
+                deptIds.size(), deptOk, deptEmpty, deptSkippedNoPerm,
+                added, skipped, userRoleAdded, userRoleExisting);
+            err.append(summary);
+            if (deptSkippedNoPerm > 0) {
+                // 列出最多 20 个被跳过的部门 + errcode（防止 errorMsg 过长）
+                StringBuilder skipDetail = new StringBuilder(" | skipped depts: ");
+                int n = 0;
+                for (java.util.Map.Entry<String, String> e : deptDiag.entrySet()) {
+                    if (!e.getValue().startsWith("SKIP")) continue;
+                    if (n++ >= 20) { skipDetail.append("..."); break; }
+                    skipDetail.append(e.getKey()).append(" ").append(e.getValue()).append("; ");
+                }
+                err.append(skipDetail);
+                err.append(" | hint: 钉钉应用「通讯录管理-成员信息读权限」可见范围未覆盖这些部门");
             }
         } catch (BusinessException e) {
             failed++;
@@ -351,9 +496,12 @@ public class DingTalkSyncService {
         if (deptId == null || "1".equals(deptId)) return companyOrgId;
         SysOrg companyOrg = orgMapper.selectById(companyOrgId);
         if (companyOrg == null) return null;
-        SysOrg n = orgMapper.selectOne(new QueryWrapper<SysOrg>()
-            .eq("dingtalk_dept_id", deptId)
-            .eq("tenant_id", companyOrg.getTenantId()));
+        // 同上：tenantId 为 null 必须 isNull
+        QueryWrapper<SysOrg> q = new QueryWrapper<SysOrg>().eq("dingtalk_dept_id", deptId);
+        Long tid = companyOrg.getTenantId();
+        if (tid == null) q.isNull("tenant_id");
+        else q.eq("tenant_id", tid);
+        SysOrg n = orgMapper.selectOne(q);
         return n == null ? null : n.getId();
     }
 
@@ -370,6 +518,8 @@ public class DingTalkSyncService {
     private static String truncate(String s, int max) {
         return s == null ? null : (s.length() <= max ? s : s.substring(0, max));
     }
+
+    private static boolean notBlank(String s) { return s != null && !s.isBlank(); }
 
     private static String combine(String a, String b) {
         if (a == null) return b;

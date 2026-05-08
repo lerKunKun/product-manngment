@@ -5,6 +5,7 @@ import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.org.entity.SysOrg;
 import com.biou.shopifyhub.org.mapper.SysOrgMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,9 +18,11 @@ import java.util.Map;
 public class OrgService {
 
     private final SysOrgMapper mapper;
+    private final JdbcTemplate jdbc;
 
-    public OrgService(SysOrgMapper mapper) {
+    public OrgService(SysOrgMapper mapper, JdbcTemplate jdbc) {
         this.mapper = mapper;
+        this.jdbc = jdbc;
     }
 
     /** 列出所有节点（用于前端建树）。 */
@@ -27,9 +30,17 @@ public class OrgService {
         return mapper.selectList(new QueryWrapper<SysOrg>().orderByAsc("sort", "id"));
     }
 
-    /** 树结构（map 形式：{node, children:[...]}），适合前端 antd Tree。 */
+    /** 树结构（map 形式：{node, children:[...]}），适合前端 antd Tree。
+     *  含 userCount：本节点直接挂的去重 user 数（前端聚合"自己+子孙"得整树员工数）。 */
     public List<Map<String, Object>> tree() {
         List<SysOrg> all = listAll();
+        // 一次 group by 拿每个 org_id 的去重 user 数
+        Map<Long, Long> userCountByOrg = new HashMap<>();
+        jdbc.query(
+            "SELECT org_id, COUNT(DISTINCT user_id) AS cnt FROM sys_user_role "
+                + "WHERE org_id IS NOT NULL GROUP BY org_id",
+            rs -> { userCountByOrg.put(rs.getLong("org_id"), rs.getLong("cnt")); }
+        );
         Map<Long, Map<String, Object>> nodeMap = new HashMap<>();
         for (SysOrg o : all) {
             Map<String, Object> n = new HashMap<>();
@@ -42,6 +53,7 @@ public class OrgService {
             n.put("path", o.getPath());
             n.put("dingtalkDeptId", o.getDingtalkDeptId());
             n.put("status", o.getStatus());
+            n.put("userCount", userCountByOrg.getOrDefault(o.getId(), 0L));
             n.put("children", new ArrayList<Map<String, Object>>());
             nodeMap.put(o.getId(), n);
         }
@@ -71,6 +83,10 @@ public class OrgService {
         // 物化路径
         if (input.getParentId() == null) {
             input.setPath("/");
+            // 顶级 COMPANY 兜底租户：未指定 tenantId 时填平台默认 1。
+            // 之前漏填会让 sys_org.tenant_id=NULL，钉钉同步 query wrapper .eq("tenant_id", null)
+            // 永远命不中已存在记录 → 用户同步只跑 root，DEPT 重跑撞 unique key。
+            if (input.getTenantId() == null) input.setTenantId(1L);
         } else {
             SysOrg parent = mapper.selectById(input.getParentId());
             if (parent == null) throw new BusinessException(ResultCode.NOT_FOUND, "父节点不存在");

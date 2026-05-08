@@ -23,6 +23,8 @@ export type AdminUserListItem = {
   lastLoginAt?: string;
   lastLoginIp?: string;
   createdAt?: string;
+  /** true + lastLoginAt 为空时前端派生「待激活」状态。 */
+  passwordMustChange?: boolean;
 };
 
 export type AdminUserPage = {
@@ -71,13 +73,21 @@ export const userAdminApi = {
     status?: string;
     userType?: string;
     deptId?: number;
+    /** 子孙过滤：选中节点 + 所有子孙 id 数组，与 deptId 二选一传，同时传时 deptIds 优先。 */
+    deptIds?: number[];
     page?: number;
     size?: number;
   }) => {
     const q = new URLSearchParams();
-    Object.entries(params).forEach(
-      ([k, v]) => v !== undefined && v !== "" && q.set(k, String(v))
-    );
+    Object.entries(params).forEach(([k, v]) => {
+      if (v === undefined || v === "" || v === null) return;
+      if (Array.isArray(v)) {
+        // Spring 接 List<Long> 用同名重复 key：deptIds=1&deptIds=2&deptIds=3
+        for (const it of v) q.append(k, String(it));
+      } else {
+        q.set(k, String(v));
+      }
+    });
     return api.get<AdminUserPage>(`/admin/users?${q.toString()}`);
   },
 

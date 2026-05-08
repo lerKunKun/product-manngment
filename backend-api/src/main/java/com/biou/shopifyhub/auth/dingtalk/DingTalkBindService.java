@@ -91,12 +91,46 @@ public class DingTalkBindService {
                 "该钉钉账号已被其他人绑定，请联系管理员");
         }
 
-        // 只更新 dingtalk_* 三个字段（不动 username / employeeNo / passwordHash 等）
+        // 1) 钉钉三件套字段
         SysUser patch = new SysUser();
         patch.setId(currentUserId);
         patch.setDingtalkUnionid(unionId);
         if (dingUserId != null && !dingUserId.isBlank()) patch.setDingtalkUserid(dingUserId);
         if (corpId != null && !corpId.isBlank()) patch.setDingtalkCorpId(corpId);
+
+        // 2) 同步钉钉 profile（avatar / phone / email / employeeNo / username / position）
+        // 策略：avatar/phone/email 总是覆盖（钉钉是源头）；employeeNo/username/position 仅当本地为空时填，
+        //       避免覆盖本地 HR 已分配的工号 / 用户名（用户名是登录名，覆盖会破坏登录）。
+        try {
+            DingTalkResolvedConfig cfg = configService.resolveByTenantId(current.getDefaultTenantId());
+            String token = null;
+            if (cfg.isConfigured() && dingUserId != null && !dingUserId.isBlank()) {
+                token = (cfg.source() == DingTalkResolvedConfig.Source.DB)
+                    ? apiClient.getAccessTokenForCorp(cfg.corpId(), cfg.appKey(), cfg.appSecret())
+                    : apiClient.getAccessToken();
+                DingTalkApiClient.DingUserDetail d = apiClient.getUserDetail(token, dingUserId);
+                if (d != null) {
+                    if (d.avatar() != null && !d.avatar().isBlank()) patch.setAvatarUrl(d.avatar());
+                    if (d.mobile() != null && !d.mobile().isBlank()) patch.setPhone(d.mobile());
+                    if (d.email() != null && !d.email().isBlank()) patch.setEmail(d.email());
+                    if (isBlank(current.getEmployeeNo()) && d.jobNumber() != null && !d.jobNumber().isBlank()) {
+                        patch.setEmployeeNo(d.jobNumber());
+                    }
+                    // username 是登录名，仅当无意义占位（dt_xxx）时回填，否则保留原本
+                    String origUsername = current.getUsername();
+                    if ((origUsername == null || origUsername.startsWith("dt_"))
+                        && d.name() != null && !d.name().isBlank()) {
+                        patch.setUsername(d.name());
+                    }
+                    if (isBlank(current.getPosition()) && d.title() != null && !d.title().isBlank()) {
+                        patch.setPosition(d.title());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[dingtalk-bind] enrich profile failed, fall back to dingtalk_* only. userId={} err={}",
+                currentUserId, e.getMessage());
+        }
         userMapper.updateById(patch);
 
         log.info("[dingtalk-bind] success userId={} unionId={} dingUserId={} corpId={}",
@@ -155,9 +189,64 @@ public class DingTalkBindService {
         }
     }
 
+    /**
+     * 解绑当前用户的钉钉账号：清空 dingtalk_* 三字段，**同时**强制设置一遍新密码（不校验旧密码）。
+     * 解绑后用户失去钉钉登录入口，必须有可用的本地密码 —— 所以一并改密是必要的。
+     * 调用方负责前置 step-up（@RequireSensitiveOp("DINGTALK_UNBIND") 已在 controller 上）。
+     */
+    @Transactional
+    public void unbind(Long currentUserId, String newPassword, String ip, String userAgent) {
+        if (currentUserId == null) throw new BusinessException(ResultCode.UNAUTHORIZED);
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new BusinessException(ResultCode.VALIDATION_FAILED, "新密码至少 8 位");
+        }
+        SysUser current = userMapper.selectById(currentUserId);
+        if (current == null) throw new BusinessException(ResultCode.NOT_FOUND, "当前用户不存在");
+        if (current.getDingtalkUnionid() == null || current.getDingtalkUnionid().isBlank()) {
+            throw new BusinessException(ResultCode.VALIDATION_FAILED, "当前账号未绑定钉钉，无需解绑");
+        }
+        // MyBatis-Plus updateById 对 null 字段默认不更新 —— 直接 SQL 强制 set NULL；
+        // 同一条 UPDATE 顺手把 password_hash 改了 + password_must_change=0（用户已自定）
+        String hash = org.springframework.security.crypto.bcrypt.BCrypt
+            .hashpw(newPassword, org.springframework.security.crypto.bcrypt.BCrypt.gensalt(12));
+        userMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SysUser>()
+            .eq("id", currentUserId)
+            .set("dingtalk_unionid", null)
+            .set("dingtalk_userid", null)
+            .set("dingtalk_corp_id", null)
+            .set("password_hash", hash)
+            .set("password_must_change", 0));
+        log.info("[dingtalk-unbind] success userId={} prevUnionId={} (new password set)",
+            currentUserId, current.getDingtalkUnionid());
+
+        try {
+            SysAuditLog row = new SysAuditLog();
+            row.setUserId(currentUserId);
+            row.setUsername(current.getUsername());
+            row.setEmployeeNo(current.getEmployeeNo());
+            row.setTenantId(current.getDefaultTenantId());
+            row.setModule("auth/dingtalk-bind");
+            row.setAction("UNBIND");
+            row.setResourceType("user");
+            row.setResourceId(String.valueOf(currentUserId));
+            row.setRequestMethod("POST");
+            row.setRequestUri("/auth/dingtalk/unbind");
+            row.setRequestPayload("{\"prevUnionId\":\"" + safe(current.getDingtalkUnionid()) + "\"}");
+            row.setResponseStatus(200);
+            row.setIp(ip);
+            row.setUserAgent(userAgent);
+            row.setSensitive(true);
+            row.setCreatedAt(LocalDateTime.now());
+            auditMapper.insert(row);
+        } catch (Exception e) {
+            log.warn("dingtalk-unbind audit insert failed: {}", e.getMessage());
+        }
+    }
+
     private static String safe(String s) {
         return s == null ? "" : s.replace("\"", "'").replace("\\", "/");
     }
+    private static boolean isBlank(String s) { return s == null || s.isBlank(); }
 
     public record ResolvedDingUser(String dingUserId, String corpId) {}
 }

@@ -29,5 +29,7 @@ public record AdminUserListItem(
     List<String> roleNames,
     LocalDateTime lastLoginAt,
     String lastLoginIp,
-    LocalDateTime createdAt
+    LocalDateTime createdAt,
+    /** true + lastLoginAt 为空时前端派生「待激活」状态（邀请已发但未首次登录改密）。 */
+    Boolean passwordMustChange
 ) {}

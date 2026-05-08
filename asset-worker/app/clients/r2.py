@@ -170,3 +170,74 @@ class R2Client:
         except Exception as exc:  # noqa: BLE001 - intentional swallow
             logger.debug("r2 head_bucket failed: %s", exc)
             return False
+
+    def ensure_bucket(self) -> None:
+        """Verify the bucket exists; create it if missing.
+
+        Called once at worker startup to fail fast when an operator forgot
+        to provision the R2 bucket — instead of letting the first /pull/*
+        crash on ``NoSuchBucket`` and surface as a generic 500.
+
+        Behaviour matrix:
+          - head_bucket 200            → no-op
+          - head_bucket 404/NoSuchBucket → create_bucket; on 403 (token
+            lacks bucket-admin) raise RuntimeError with an actionable hint
+          - head_bucket 403            → assume bucket exists, token just
+            lacks list/head perms (common with R2 data-plane tokens)
+          - any other transport error → log + assume reachable; let the
+            real put/get raise later
+        """
+        self._ensure_configured()
+        client = self._get_client()
+        try:
+            client.head_bucket(Bucket=self.bucket)
+            logger.info("r2 bucket '%s' OK", self.bucket)
+            return
+        except ClientError as exc:
+            code = ""
+            status = 0
+            if exc.response is not None:
+                code = exc.response.get("Error", {}).get("Code", "") or ""
+                status = exc.response.get("ResponseMetadata", {}).get(
+                    "HTTPStatusCode", 0
+                )
+            if code in {"404", "NoSuchBucket", "NotFound"} or status == 404:
+                self._create_bucket(client)
+                return
+            if code in {"403", "Forbidden", "AccessDenied"} or status == 403:
+                logger.warning(
+                    "r2 head_bucket forbidden bucket=%s — token likely has "
+                    "object-only scope, assuming bucket exists",
+                    self.bucket,
+                )
+                return
+            logger.warning(
+                "r2 head_bucket bucket=%s code=%s status=%s — assuming reachable",
+                self.bucket,
+                code,
+                status,
+            )
+        except BotoCoreError as exc:
+            logger.warning(
+                "r2 head_bucket transport error bucket=%s err=%s — assuming reachable",
+                self.bucket,
+                exc,
+            )
+
+    def _create_bucket(self, client) -> None:
+        try:
+            client.create_bucket(Bucket=self.bucket)
+            logger.info("r2 bucket '%s' created", self.bucket)
+        except ClientError as exc:
+            code = ""
+            if exc.response is not None:
+                code = exc.response.get("Error", {}).get("Code", "") or ""
+            if code in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
+                logger.info("r2 bucket '%s' already exists (raced)", self.bucket)
+                return
+            raise RuntimeError(
+                f"R2 bucket '{self.bucket}' is missing and auto-create failed "
+                f"({code or exc}). Create it manually in the Cloudflare R2 "
+                f"dashboard, or grant the API token bucket-admin permission. "
+                f"To skip this check, set R2_BUCKET_ENSURE=false."
+            ) from exc

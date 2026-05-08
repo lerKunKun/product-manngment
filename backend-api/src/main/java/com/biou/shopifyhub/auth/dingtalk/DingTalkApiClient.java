@@ -201,6 +201,47 @@ public class DingTalkApiClient {
     }
 
     /**
+     * 调 topapi/v2/user/get 拉钉钉用户详情，返回 (name, mobile, email, avatar, jobNumber, title)。
+     * 失败 / errcode != 0 → 返回 null（调用方自行降级）。
+     */
+    public DingUserDetail getUserDetail(String accessToken, String userId) {
+        if (accessToken == null || accessToken.isBlank() || userId == null || userId.isBlank()) {
+            return null;
+        }
+        try {
+            String url = "https://oapi.dingtalk.com/topapi/v2/user/get?access_token=" + accessToken;
+            String json = JSON.writeValueAsString(Map.of("userid", userId, "language", "zh_CN"));
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(8))
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            JsonNode n = JSON.readTree(resp.body());
+            int errcode = n.path("errcode").asInt(-1);
+            if (errcode != 0) {
+                log.warn("DingTalk user/get errcode={} body={}", errcode, resp.body());
+                return null;
+            }
+            JsonNode r = n.path("result");
+            return new DingUserDetail(
+                r.path("name").asText(null),
+                r.path("mobile").asText(null),
+                r.path("email").asText(null),
+                r.path("avatar").asText(null),
+                r.path("job_number").asText(null),
+                r.path("title").asText(null)
+            );
+        } catch (Exception e) {
+            log.error("DingTalk user/get error userId={}", userId, e);
+            return null;
+        }
+    }
+
+    public record DingUserDetail(String name, String mobile, String email,
+                                 String avatar, String jobNumber, String title) {}
+
+    /**
      * 用指定 corp 的 token + agent 发工作通知。userIds = 该 corp 下的钉钉 userId。
      */
     public boolean sendTextWorkNotificationForCorp(String corpId, String agentId, String appKey,

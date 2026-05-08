@@ -1,6 +1,7 @@
 package com.biou.shopifyhub.auth.dingtalk;
 
 import com.biou.shopifyhub.auth.dto.LoginResult;
+import com.biou.shopifyhub.auth.sensitive.RequireSensitiveOp;
 import com.biou.shopifyhub.auth.service.DingTalkLoginService;
 import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
@@ -192,6 +193,27 @@ public class DingTalkAuthController {
             log.error("[dingtalk-bind-callback] unexpected error", e);
             response.sendRedirect(frontendRedirect + "/profile?error=" + enc("bind_failed"));
         }
+    }
+
+    /**
+     * 解绑钉钉 + 设置新密码。要求当前已登录 + step-up（钉钉验证码二次确认）+ 新密码 ≥ 8 位。
+     * 不校验旧密码：用户可能完全没用过本地密码（钉钉扫码登录），强制设置一遍才能保证解绑后还能登录。
+     */
+    @PostMapping("/unbind")
+    @RequireSensitiveOp("DINGTALK_UNBIND")
+    public Result<Void> unbind(@RequestBody UnbindReq req, HttpServletRequest request) {
+        Long userId = CurrentUser.userIdOrThrow();
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isBlank()) ip = request.getRemoteAddr();
+        else ip = ip.split(",")[0].trim();
+        String ua = request.getHeader("User-Agent");
+        bindService.unbind(userId, req == null ? null : req.newPassword, ip, ua);
+        return Result.ok();
+    }
+
+    /** 解绑请求体：仅 newPassword（旧密码不校验，因为钉钉登录用户可能根本没用过本地密码）。 */
+    public static class UnbindReq {
+        public String newPassword;
     }
 
     @PostMapping("/event")
