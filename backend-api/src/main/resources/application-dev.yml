@@ -109,6 +109,13 @@ dingtalk:
   main-app-secret: ${DINGTALK_MAIN_APP_SECRET:}
   event-token: ${DINGTALK_EVENT_TOKEN:}
   event-aes-key: ${DINGTALK_EVENT_AES_KEY:}
+  qr-connect-url: ${DINGTALK_QR_CONNECT_URL:https://login.dingtalk.com/oauth2/auth}
+  token-url: ${DINGTALK_TOKEN_URL:https://api.dingtalk.com/v1.0/oauth2/userAccessToken}
+  user-info-url: ${DINGTALK_USER_INFO_URL:https://api.dingtalk.com/v1.0/contact/users/me}
+  # 这三个回调地址在生产必须由 .env.prod 注入；本地开发回退到 localhost
+  redirect-uri: ${DINGTALK_REDIRECT_URI:http://localhost:8080/api/auth/dingtalk/callback}
+  bind-redirect-uri: ${DINGTALK_BIND_REDIRECT_URI:http://localhost:8080/api/auth/dingtalk/bind/callback}
+  frontend-redirect: ${DINGTALK_FRONTEND_REDIRECT:http://localhost:3000}
 
 # Shopify webhook（W2-SNAP-02）+ snapshot debounce（W2-SNAP-03）
 # - webhook.secret 留空时会跳过 HMAC 校验 + 日志 WARN（仅 dev）；生产必须填 Partner App API secret key

@@ -48,16 +48,16 @@ public class DingTalkAuthController {
     private final SysUserMapper userMapper;
     private final CookieUtil cookieUtil;
 
-    @Value("${dingtalk.qr-connect-url:https://login.dingtalk.com/oauth2/auth}")
+    @Value("${dingtalk.qr-connect-url}")
     private String qrConnectUrl;
 
-    @Value("${dingtalk.redirect-uri:http://localhost:8080/api/auth/dingtalk/callback}")
+    @Value("${dingtalk.redirect-uri}")
     private String redirectUri;
 
-    @Value("${dingtalk.bind-redirect-uri:http://localhost:8080/api/auth/dingtalk/bind/callback}")
+    @Value("${dingtalk.bind-redirect-uri}")
     private String bindRedirectUri;
 
-    @Value("${dingtalk.frontend-redirect:http://localhost:3000}")
+    @Value("${dingtalk.frontend-redirect}")
     private String frontendRedirect;
 
     public DingTalkAuthController(
