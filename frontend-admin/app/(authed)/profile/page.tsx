@@ -80,10 +80,11 @@ export default function ProfilePage() {
       setPwdMsg(t("profile.password.tooShort"));
       return;
     }
+    const isFirstSet = me?.hasPassword === false;
     setPwdBusy(true);
     try {
-      await userApi.changePassword(oldPwd, newPwd);
-      setPwdMsg(t("profile.password.success"));
+      await userApi.changePassword(newPwd, isFirstSet ? undefined : oldPwd);
+      setPwdMsg(t(isFirstSet ? "profile.password.successSet" : "profile.password.success"));
       setOldPwd("");
       setNewPwd("");
       setConfirmPwd("");
@@ -99,7 +100,8 @@ export default function ProfilePage() {
   if (error) return <p className="text-sm text-destructive">{error}</p>;
   if (!me) return null;
 
-  const successPrefix = t("profile.password.success");
+  const successMsgs = [t("profile.password.success"), t("profile.password.successSet")];
+  const isFirstSet = me.hasPassword === false;
 
   async function bindDingtalk() {
     try {
@@ -181,7 +183,7 @@ export default function ProfilePage() {
             }
           />
         </dl>
-        {me.passwordMustChange && (
+        {me.passwordMustChange && me.hasPassword && (
           <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
             {t("profile.passwordMustChangeWarn")}
           </div>
@@ -189,17 +191,24 @@ export default function ProfilePage() {
       </section>
 
       <section className="rounded-lg border bg-background p-5">
-        <h2 className="mb-3 text-base font-medium">{t("profile.changePassword")}</h2>
+        <h2 className="mb-1 text-base font-medium">
+          {isFirstSet ? t("profile.setPassword") : t("profile.changePassword")}
+        </h2>
+        {isFirstSet && (
+          <p className="mb-3 text-xs text-muted-foreground">{t("profile.setPasswordHint")}</p>
+        )}
         <form onSubmit={changePwd} className="space-y-4">
-          <Field label={t("profile.password.old")}>
-            <input
-              type="password"
-              value={oldPwd}
-              onChange={(e) => setOldPwd(e.target.value)}
-              required
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-          </Field>
+          {!isFirstSet && (
+            <Field label={t("profile.password.old")}>
+              <input
+                type="password"
+                value={oldPwd}
+                onChange={(e) => setOldPwd(e.target.value)}
+                required
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </Field>
+          )}
           <Field label={t("profile.password.new")}>
             <input
               type="password"
@@ -220,7 +229,7 @@ export default function ProfilePage() {
             />
           </Field>
           {pwdMsg && (
-            <p className={"text-sm " + (pwdMsg === successPrefix ? "text-emerald-700" : "text-destructive")}>
+            <p className={"text-sm " + (successMsgs.includes(pwdMsg) ? "text-emerald-700" : "text-destructive")}>
               {pwdMsg}
             </p>
           )}
@@ -229,7 +238,11 @@ export default function ProfilePage() {
             disabled={pwdBusy}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
-            {pwdBusy ? t("profile.password.submitting") : t("profile.password.submit")}
+            {pwdBusy
+              ? t("profile.password.submitting")
+              : isFirstSet
+                ? t("profile.password.submitSet")
+                : t("profile.password.submit")}
           </button>
         </form>
       </section>

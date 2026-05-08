@@ -18,11 +18,9 @@ import com.biou.shopifyhub.rbac.UserRolePermissionService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -36,7 +34,6 @@ import java.util.Map;
 public class DingTalkLoginService {
 
     private static final Logger log = LoggerFactory.getLogger(DingTalkLoginService.class);
-    private static final SecureRandom RNG = new SecureRandom();
 
     private final SysUserMapper userMapper;
     private final SysUserRoleMapper userRoleMapper;
@@ -71,11 +68,9 @@ public class DingTalkLoginService {
         SysUser user = userMapper.selectOne(new QueryWrapper<SysUser>()
             .eq("dingtalk_unionid", dtUser.unionId()));
 
-        boolean fresh = false;
         if (user == null) {
             // 自助注册（A-1.5 / A-1.4）
             user = autoRegister(dtUser);
-            fresh = true;
         } else {
             if ("FROZEN".equals(user.getStatus())) throw new BusinessException(ResultCode.AUTH_ACCOUNT_FROZEN);
             if ("EXPIRED".equals(user.getStatus())) throw new BusinessException(ResultCode.AUTH_ACCOUNT_EXPIRED);
@@ -106,7 +101,8 @@ public class DingTalkLoginService {
             user.getUsername(),
             user.getEmployeeNo(),
             user.getUserType(),
-            fresh || Boolean.TRUE.equals(user.getPasswordMustChange()),
+            // fresh（钉钉自助新用户）不再强制改密：他们 password_hash=NULL，没"必须改"概念
+            Boolean.TRUE.equals(user.getPasswordMustChange()),
             access,
             rbac.loadRoles(user.getId()),
             rbac.loadPermissions(user.getId())
@@ -115,15 +111,13 @@ public class DingTalkLoginService {
     }
 
     private SysUser autoRegister(DingTalkClient.DingTalkUser dt) {
-        // 工号：DB 查 max(employee_no LIKE 'EMP%') + 1（避免进程重启冲突）
-        String tempPwd = randomPwd(12);
-
+        // 钉钉自助注册不再生成本地临时密码：password_hash 留 NULL，
+        // 用户在个人中心可选择「设置本地密码」作为钉钉登录的备选途径。
         SysUser u = new SysUser();
         // 先 insert 拿 id，再用 sys_user.id 生成 employee_no（保证全局唯一）
         u.setEmployeeNo("EMP_PENDING_" + System.nanoTime()); // 占位，下面 update
         u.setUsername("EMP_PENDING_" + System.nanoTime());
-        u.setPasswordHash(BCrypt.hashpw(tempPwd, BCrypt.gensalt(12)));
-        u.setPasswordMustChange(true);
+        u.setPasswordMustChange(false);
         u.setEmail(blankToNull(dt.email()));
         u.setPhone(blankToNull(dt.mobile()));
         u.setDingtalkUnionid(dt.unionId());
@@ -146,18 +140,10 @@ public class DingTalkLoginService {
             userRoleMapper.insert(ur);
         }
 
-        log.info("[dingtalk-self-register] empNo={} unionId={} tempPwd={} (TODO send via 工作通知)",
-            u.getEmployeeNo(), dt.unionId(), tempPwd);
-        // TODO: W1-AUTH-05 完整化：用工作通知发临时密码，而不是仅打日志
+        log.info("[dingtalk-self-register] empNo={} unionId={} (no local password)",
+            u.getEmployeeNo(), dt.unionId());
         return u;
     }
 
     private static String blankToNull(String s) { return (s == null || s.isBlank()) ? null : s; }
-
-    private static String randomPwd(int len) {
-        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%&*";
-        StringBuilder sb = new StringBuilder(len);
-        for (int i = 0; i < len; i++) sb.append(chars.charAt(RNG.nextInt(chars.length())));
-        return sb.toString();
-    }
 }

@@ -10,6 +10,8 @@ export type Me = {
   status: string;
   expiresAt?: string;
   passwordMustChange: boolean;
+  /** 是否已设过本地密码；false 表示钉钉首登态，前端走「设置密码」流程不要求原密码 */
+  hasPassword: boolean;
   dingtalkUserId?: string;
   avatarUrl?: string;
   position?: string;
@@ -18,6 +20,10 @@ export type Me = {
 
 export const userApi = {
   me: () => api.get<Me>("/user/me"),
-  changePassword: (oldPassword: string, newPassword: string) =>
-    api.post<void>("/user/change-password", { oldPassword, newPassword }),
+  /** oldPassword 在「首次设置本地密码」时可省略 */
+  changePassword: (newPassword: string, oldPassword?: string) =>
+    api.post<void>(
+      "/user/change-password",
+      oldPassword ? { oldPassword, newPassword } : { newPassword }
+    ),
 };

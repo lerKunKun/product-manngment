@@ -11,6 +11,8 @@ import com.biou.shopifyhub.org.entity.SysOrg;
 import com.biou.shopifyhub.org.mapper.SysOrgMapper;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +23,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/user")
 public class UserProfileController {
+
+    private static final Logger log = LoggerFactory.getLogger(UserProfileController.class);
 
     private final SysUserMapper userMapper;
     private final SysOrgMapper orgMapper;
@@ -45,6 +49,8 @@ public class UserProfileController {
         dto.put("status", u.getStatus());
         dto.put("expiresAt", u.getExpiresAt());
         dto.put("passwordMustChange", u.getPasswordMustChange());
+        // 钉钉首登用户 password_hash 为 NULL → 前端走「设置本地密码」分支，不要求原密码
+        dto.put("hasPassword", u.getPasswordHash() != null);
         dto.put("dingtalkUserId", u.getDingtalkUserid());
         dto.put("avatarUrl", u.getAvatarUrl());
         dto.put("position", u.getPosition());
@@ -69,11 +75,18 @@ public class UserProfileController {
         Long uid = CurrentUser.userIdOrThrow();
         SysUser u = userMapper.selectById(uid);
         if (u == null) throw new BusinessException(ResultCode.NOT_FOUND);
-        if (u.getPasswordHash() == null || !BCrypt.checkpw(req.oldPassword, u.getPasswordHash())) {
-            throw new BusinessException(ResultCode.AUTH_BAD_CREDENTIALS, "原密码不正确");
-        }
         if (req.newPassword == null || req.newPassword.length() < 8) {
             throw new BusinessException(ResultCode.VALIDATION_FAILED, "新密码至少 8 位");
+        }
+        if (u.getPasswordHash() == null) {
+            // 首次设置本地密码（钉钉自助注册用户）：不要求 oldPassword
+            log.info("[user-set-password-first] userId={}", uid);
+        } else {
+            // 已有本地密码：必须验旧的
+            if (req.oldPassword == null || req.oldPassword.isBlank()
+                || !BCrypt.checkpw(req.oldPassword, u.getPasswordHash())) {
+                throw new BusinessException(ResultCode.AUTH_BAD_CREDENTIALS, "原密码不正确");
+            }
         }
         u.setPasswordHash(BCrypt.hashpw(req.newPassword, BCrypt.gensalt(12)));
         u.setPasswordMustChange(false);
@@ -82,7 +95,8 @@ public class UserProfileController {
     }
 
     public static class ChangePwdReq {
-        @NotBlank public String oldPassword;
+        // 首次设置本地密码（password_hash=NULL）时可空；其它场景必填
+        public String oldPassword;
         @NotBlank @Size(min = 8, max = 64) public String newPassword;
     }
 }
