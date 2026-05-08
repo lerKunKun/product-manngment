@@ -12,14 +12,16 @@
  * 兼容两条 OAuth 链路：
  *   - 标准接入 (ShopifyOAuthController)：?shop=xxx           → 倒计时后回 /stores
  *   - 一键开店 (SagaOAuthCallbackController)：?shop=xxx&taskId=N → 倒计时后回 /newstore/N
+ *
+ * Next 15 prod build 要求：useSearchParams 必须裹在 Suspense 边界，否则 prerender 报错。
  */
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 const COUNTDOWN_SECONDS = 3;
 
-export default function OAuthSuccessPage() {
+function SuccessInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const shop = searchParams.get("shop") ?? "";
@@ -78,5 +80,19 @@ export default function OAuthSuccessPage() {
         </button>
       </div>
     </div>
+  );
+}
+
+export default function OAuthSuccessPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+          加载中…
+        </div>
+      }
+    >
+      <SuccessInner />
+    </Suspense>
   );
 }

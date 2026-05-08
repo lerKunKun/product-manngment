@@ -1,0 +1,172 @@
+# 单机生产/内测部署：所有服务共用 docker network；
+# 仅 frontend / backend / asset-worker 暴露到 127.0.0.1，由宿主机 nginx 反代到公网域名 hy.biounetwork.com
+# 启动：docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+
+name: shopify-hub-prod
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: shub-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-shub-root-prod}
+      MYSQL_DATABASE: ${MYSQL_PLATFORM_DB:-platform}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
+      - --max-connections=300
+      - --innodb-buffer-pool-size=384M
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_PASSWORD:-shub-root-prod}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8-alpine
+    container_name: shub-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: shub-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${MQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${MQ_PASS:-guest}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: shub-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: shub-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb -p local/${R2_BUCKET:-shopify-themes} || true;
+      mc mb -p local/${R2_PRODUCT_MEDIA_BUCKET:-product-media} || true;
+      echo 'MinIO buckets ready.';
+      "
+
+  asset-worker:
+    build:
+      context: ./asset-worker
+    container_name: shub-asset-worker
+    restart: unless-stopped
+    environment:
+      APP_PORT: "9000"
+      APP_ENV: prod
+      ASSET_WORKER_TOKEN: ${ASSET_WORKER_TOKEN:-prod-worker-token}
+      R2_ENDPOINT: ${R2_ENDPOINT}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_BUCKET: ${R2_BUCKET}
+      R2_PUBLIC_BASE: ${R2_PUBLIC_BASE}
+      MQ_HOST: rabbitmq
+      MQ_PORT: "5672"
+      MQ_USER: ${MQ_USER:-guest}
+      MQ_PASS: ${MQ_PASS:-guest}
+      SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2024-10}
+      BACKEND_PROGRESS_URL: http://backend:8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-prod-internal-token}
+    depends_on:
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:9000/health',timeout=3); sys.exit(0 if r.status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend-api
+    container_name: shub-backend
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      APP_PORT: "8080"
+      SPRING_PROFILES_ACTIVE: dev
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MQ_HOST: rabbitmq
+      MQ_PORT: "5672"
+      SHOPIFY_WORKER_BASE_URL: http://asset-worker:9000
+    ports:
+      - "127.0.0.1:18080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend-admin
+      args:
+        # build-time: rewrites 在 Next.js server 端读这个变量代理 /api → 后端容器
+        NEXT_PUBLIC_API_BASE: http://backend:8080/api
+    container_name: shub-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE: http://backend:8080/api
+    ports:
+      - "127.0.0.1:13000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  minio-data:

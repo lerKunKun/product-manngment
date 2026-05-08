@@ -12,11 +12,17 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+.env.prod
+.env.staging
+.env.production
 .secrets/
 *.pem
 *.key
 !*.example
 !*.example.*
+
+# 部署配置清单（含真凭证，仅本地保留）
+ops/deploy/配置清单-*.md
 
 # ===== Logs =====
 *.log
