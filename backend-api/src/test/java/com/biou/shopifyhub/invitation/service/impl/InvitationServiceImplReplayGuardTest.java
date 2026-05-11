@@ -48,7 +48,8 @@ class InvitationServiceImplReplayGuardTest {
         service = new InvitationServiceImpl(
             invitationMapper, userMapper,
             null, null, null, null, null, null, null, null,
-            null /* UserRolePermissionService — 这套单测不走 create()，不需要 mock */
+            null /* UserRolePermissionService — 这套单测不走 create()，不需要 mock */,
+            null /* JdbcTemplate — 这套单测不走 list() */
         );
     }
 

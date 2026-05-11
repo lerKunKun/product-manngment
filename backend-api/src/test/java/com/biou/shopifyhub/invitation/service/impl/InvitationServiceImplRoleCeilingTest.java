@@ -37,7 +37,7 @@ class InvitationServiceImplRoleCeilingTest {
         service = new InvitationServiceImpl(
             null, null, null, null, null,
             null, null, null, null, null,
-            rbac
+            rbac, null /* JdbcTemplate — 这套单测不走 list()，不需要 */
         );
     }
 

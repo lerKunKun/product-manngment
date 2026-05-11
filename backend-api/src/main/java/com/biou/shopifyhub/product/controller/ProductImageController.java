@@ -13,6 +13,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -167,6 +168,7 @@ public class ProductImageController {
     }
 
     @PostMapping("/product/{productId}/image/reorder")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     @Transactional
     public Result<Map<String, Integer>> reorder(@PathVariable Long productId, @RequestBody ReorderReq req) {
         if (req.ids == null || req.ids.isEmpty()) {
