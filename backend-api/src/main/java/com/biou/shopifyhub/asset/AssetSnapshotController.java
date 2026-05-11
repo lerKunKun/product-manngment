@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.biou.shopifyhub.asset.entity.AssetFile;
 import com.biou.shopifyhub.asset.entity.AssetSnapshot;
+import com.biou.shopifyhub.asset.entity.AssetSnapshotEntry;
 import com.biou.shopifyhub.asset.mapper.AssetFileMapper;
+import com.biou.shopifyhub.asset.mapper.AssetSnapshotEntryMapper;
 import com.biou.shopifyhub.asset.mapper.AssetSnapshotMapper;
 import com.biou.shopifyhub.asset.sync.StoreConnectedEvent;
 import com.biou.shopifyhub.asset.sync.StoreSyncListener;
@@ -41,23 +43,29 @@ public class AssetSnapshotController {
 
     private final AssetSnapshotMapper snapshotMapper;
     private final AssetFileMapper fileMapper;
+    private final AssetSnapshotEntryMapper entryMapper;
     private final FileService fileService;
     private final ObjectMapper objectMapper;
     private final StoreMapper storeMapper;
     private final StoreSyncListener storeSyncListener;
+    private final SnapshotEntryIndexer entryIndexer;
 
     public AssetSnapshotController(AssetSnapshotMapper snapshotMapper,
                                    AssetFileMapper fileMapper,
+                                   AssetSnapshotEntryMapper entryMapper,
                                    FileService fileService,
                                    ObjectMapper objectMapper,
                                    StoreMapper storeMapper,
-                                   StoreSyncListener storeSyncListener) {
+                                   StoreSyncListener storeSyncListener,
+                                   SnapshotEntryIndexer entryIndexer) {
         this.snapshotMapper = snapshotMapper;
         this.fileMapper = fileMapper;
+        this.entryMapper = entryMapper;
         this.fileService = fileService;
         this.objectMapper = objectMapper;
         this.storeMapper = storeMapper;
         this.storeSyncListener = storeSyncListener;
+        this.entryIndexer = entryIndexer;
     }
 
     @GetMapping
@@ -286,6 +294,52 @@ public class AssetSnapshotController {
         resp.put("totalBytes", snap.getTotalBytes());
         resp.put("errorMessage", snap.getErrorMessage());
         resp.put("segments", segments);
+        return Result.ok(resp);
+    }
+
+    /**
+     * 文件列表（按 category / segment 过滤，DB 分页）。
+     *
+     * <p>首次访问某 snapshot 时 {@link SnapshotEntryIndexer#ensureIndexed} 会从 R2
+     * 把 manifest entries 平铺到 asset_snapshot_entry；之后请求都走 DB 索引查询。
+     * 相比老的 /manifests 端点（一次返回全量、客户端分页），避免了大 response 和
+     * 浏览器全量内存 + JSON parse 开销。
+     */
+    @GetMapping("/{id}/files-page")
+    @PreAuthorize("hasAuthority('PERM_THEME:PULL')")
+    public Result<Map<String, Object>> filesPage(
+        @PathVariable Long id,
+        @RequestParam(required = false) String category,
+        @RequestParam(required = false) String segment,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "50") int size
+    ) {
+        AssetSnapshot snap = snapshotMapper.selectById(id);
+        if (snap == null) {
+            return Result.error(404, "snapshot not found: " + id);
+        }
+        int safePage = Math.max(1, page);
+        int safeSize = Math.min(Math.max(1, size), 500); // 上限 500 防滥用
+
+        entryIndexer.ensureIndexed(id);
+
+        LambdaQueryWrapper<AssetSnapshotEntry> q = new LambdaQueryWrapper<AssetSnapshotEntry>()
+            .eq(AssetSnapshotEntry::getSnapshotId, id)
+            .orderByAsc(AssetSnapshotEntry::getSegment)
+            .orderByAsc(AssetSnapshotEntry::getRelativePath);
+        if (category != null && !category.isBlank()) q.eq(AssetSnapshotEntry::getCategory, category);
+        if (segment != null && !segment.isBlank()) q.eq(AssetSnapshotEntry::getSegment, segment);
+
+        Page<AssetSnapshotEntry> p = entryMapper.selectPage(new Page<>(safePage, safeSize), q);
+        Map<String, Long> counts = entryMapper.countByCategory(id);
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("items", p.getRecords());
+        resp.put("total", p.getTotal());
+        resp.put("page", p.getCurrent());
+        resp.put("size", p.getSize());
+        resp.put("totalPages", p.getPages());
+        resp.put("categoryCounts", counts);
         return Result.ok(resp);
     }
 }

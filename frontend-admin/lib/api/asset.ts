@@ -47,6 +47,41 @@ export const assetApi = {
   /** 拿某 snapshot 的全部段 manifest（theme/product/shop_settings/...），缺段不报错。 */
   manifests: (snapshotId: number): Promise<SnapshotManifests> =>
     api.get<SnapshotManifests>(`/asset-snapshot/${snapshotId}/manifests`),
+  /**
+   * 分页 + 分类查询某 snapshot 的文件 entries。首次访问会从 R2 manifest 懒填充到 DB，
+   * 后续走 DB 索引 —— 文件量大时比 manifests() 一次拿全省内存/带宽。
+   */
+  filesPage: (
+    snapshotId: number,
+    opts: { category?: string; segment?: string; page?: number; size?: number } = {}
+  ): Promise<FilesPage> => {
+    const q = new URLSearchParams();
+    if (opts.category) q.set("category", opts.category);
+    if (opts.segment) q.set("segment", opts.segment);
+    q.set("page", String(opts.page ?? 1));
+    q.set("size", String(opts.size ?? 50));
+    return api.get<FilesPage>(`/asset-snapshot/${snapshotId}/files-page?${q.toString()}`);
+  },
+};
+
+export type FilesPageItem = {
+  id: number;
+  snapshotId: number;
+  segment: string;
+  relativePath: string;
+  sha256?: string | null;
+  size?: number | null;
+  contentType?: string | null;
+  category: "theme" | "image" | "video" | "font" | "data" | "other";
+};
+
+export type FilesPage = {
+  items: FilesPageItem[];
+  total: number;
+  page: number;
+  size: number;
+  totalPages: number;
+  categoryCounts: Partial<Record<FilesPageItem["category"], number>>;
 };
 
 export type ManifestEntry = {
