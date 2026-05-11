@@ -9,6 +9,7 @@ import com.biou.shopifyhub.core.ResultCode;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -41,6 +42,7 @@ public class SysAuditLogController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('PERM_AUDIT:READ')")
     public Result<Page<SysAuditLog>> list(@RequestParam(required = false) Long userId,
                                           @RequestParam(required = false) String module,
                                           @RequestParam(required = false) String action,
@@ -57,6 +59,7 @@ public class SysAuditLogController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_AUDIT:READ')")
     public Result<SysAuditLog> get(@PathVariable Long id) {
         SysAuditLog row = auditMapper.selectById(id);
         if (row == null) return Result.error(ResultCode.NOT_FOUND);
@@ -68,6 +71,7 @@ public class SysAuditLogController {
      * UTF-8 BOM + header「时间,用户,模块,action,URI,IP,状态码,sensitive」。
      */
     @GetMapping("/export")
+    @PreAuthorize("hasAuthority('PERM_AUDIT:READ')")
     public ResponseEntity<StreamingResponseBody> export(@RequestParam(required = false) Long userId,
                                                         @RequestParam(required = false) String module,
                                                         @RequestParam(required = false) String action,

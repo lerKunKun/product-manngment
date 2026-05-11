@@ -42,6 +42,7 @@ public class AdminUserController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('PERM_USER:READ')")
     public Result<Page<AdminUserListItem>> list(@RequestParam(required = false) String keyword,
                                                 @RequestParam(required = false) String status,
                                                 @RequestParam(required = false) String userType,
@@ -55,35 +56,41 @@ public class AdminUserController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_USER:READ')")
     public Result<AdminUserListItem> get(@PathVariable Long id) {
         return Result.ok(service.getOne(id));
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Map<String, Long>> create(@RequestBody CreateUserReq req) {
         Long id = service.create(req);
         return Result.ok(Map.of("id", id));
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Void> update(@PathVariable Long id, @RequestBody UpdateUserReq req) {
         service.update(id, req);
         return Result.ok();
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Void> delete(@PathVariable Long id) {
         service.softDelete(id);
         return Result.ok();
     }
 
     @PostMapping("/{id}/freeze")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Void> freeze(@PathVariable Long id) {
         service.freeze(id, true);
         return Result.ok();
     }
 
     @PostMapping("/{id}/unfreeze")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Void> unfreeze(@PathVariable Long id) {
         service.freeze(id, false);
         return Result.ok();
@@ -91,6 +98,7 @@ public class AdminUserController {
 
     /** 重置密码：高敏感，需 X-Sensitive-Token；返回临时明文（操作员一次性看到）。 */
     @PostMapping("/{id}/reset-password")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     @RequireSensitiveOp("USER_RESET_PASSWORD")
     public Result<Map<String, String>> resetPassword(@PathVariable Long id) {
         String pwd = service.resetPassword(id);
@@ -98,24 +106,28 @@ public class AdminUserController {
     }
 
     @PostMapping("/{id}/assign-roles")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Void> assignRoles(@PathVariable Long id, @RequestBody AssignRolesBody body) {
         service.assignRoles(id, body == null ? null : body.roleIds);
         return Result.ok();
     }
 
     @PostMapping("/batch-update-dept")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Map<String, Integer>> batchUpdateDept(@RequestBody BatchDeptBody body) {
         int n = service.batchUpdateDept(body == null ? null : body.userIds, body == null ? null : body.deptId);
         return Result.ok(Map.of("affected", n));
     }
 
     @PostMapping("/batch-update-roles")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Map<String, Integer>> batchUpdateRoles(@RequestBody BatchRolesBody body) {
         int n = service.batchUpdateRoles(body == null ? null : body.userIds, body == null ? null : body.roleIds);
         return Result.ok(Map.of("affected", n));
     }
 
     @PostMapping("/batch-freeze")
+    @PreAuthorize("hasAuthority('PERM_USER:MANAGE')")
     public Result<Map<String, Integer>> batchFreeze(@RequestBody BatchFreezeBody body) {
         int n = service.batchFreeze(
             body == null ? null : body.userIds,
@@ -146,12 +158,14 @@ public class AdminUserController {
 
     /** 给前端筛选 / 表单用：所有角色。 */
     @GetMapping("/_meta/roles")
+    @PreAuthorize("hasAuthority('PERM_USER:READ')")
     public Result<List<SysRole>> roles() {
         return Result.ok(service.listAllRoles());
     }
 
     /** 给前端筛选 / 表单用：部门列表（含 COMPANY + DEPT；前端按 type 过滤）。 */
     @GetMapping("/_meta/orgs")
+    @PreAuthorize("hasAuthority('PERM_USER:READ')")
     public Result<List<SysOrg>> orgs() {
         return Result.ok(service.listDepartments());
     }

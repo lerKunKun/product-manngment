@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -81,6 +82,7 @@ public class ProductDocController {
     }
 
     @GetMapping("/product/{productId}/doc")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<List<ProductDoc>> list(@PathVariable Long productId) {
         return Result.ok(mapper.selectList(new QueryWrapper<ProductDoc>()
             .eq("product_id", productId)
@@ -94,6 +96,7 @@ public class ProductDocController {
      * <p>入参（multipart）：file + tags(JSON 数组字符串) + remark + title?
      */
     @PostMapping("/product/{productId}/doc/upload")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Map<String, Object>> upload(
         @PathVariable Long productId,
         @RequestParam("file") MultipartFile file,
@@ -158,6 +161,7 @@ public class ProductDocController {
 
     /** 保存 TipTap 富文本 JSON */
     @PostMapping("/product/{productId}/doc/rich")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Map<String, Long>> saveRich(
         @PathVariable Long productId,
         @RequestBody RichDocReq req
@@ -189,6 +193,7 @@ public class ProductDocController {
     }
 
     @DeleteMapping("/doc/{id}")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Void> delete(@PathVariable Long id) {
         ProductDoc doc = mapper.selectById(id);
         if (doc == null) throw new BusinessException(ResultCode.NOT_FOUND);

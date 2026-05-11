@@ -78,7 +78,7 @@ public class PurchaseController {
 
     /** Upsert 变体的采购信息 */
     @PutMapping("/variant/{variantId}/purchase")
-    @PreAuthorize("hasAuthority('PERM_PURCHASE:READ')")
+    @PreAuthorize("hasAuthority('PERM_PURCHASE:SKU_EDIT')")
     public Result<Void> upsert(@PathVariable Long variantId, @RequestBody PurchaseInfo input) {
         ProductVariant v = variantMapper.selectById(variantId);
         if (v == null) throw new BusinessException(ResultCode.NOT_FOUND, "变体不存在");
