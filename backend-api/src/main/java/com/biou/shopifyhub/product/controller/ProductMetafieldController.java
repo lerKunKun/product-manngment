@@ -6,6 +6,7 @@ import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.product.entity.ProductMetafield;
 import com.biou.shopifyhub.product.mapper.ProductMetafieldMapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,6 +26,7 @@ public class ProductMetafieldController {
     }
 
     @GetMapping("/product/{productId}/metafield")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<List<ProductMetafield>> list(@PathVariable Long productId) {
         return Result.ok(mapper.selectList(new QueryWrapper<ProductMetafield>()
             .eq("product_id", productId)
@@ -32,6 +34,7 @@ public class ProductMetafieldController {
     }
 
     @PostMapping("/product/{productId}/metafield")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Map<String, Long>> create(@PathVariable Long productId, @RequestBody ProductMetafield input) {
         validate(input);
         input.setProductId(productId);
@@ -48,6 +51,7 @@ public class ProductMetafieldController {
     }
 
     @PutMapping("/metafield/{id}")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Void> update(@PathVariable Long id, @RequestBody ProductMetafield patch) {
         ProductMetafield cur = mapper.selectById(id);
         if (cur == null) throw new BusinessException(ResultCode.NOT_FOUND);
@@ -60,6 +64,7 @@ public class ProductMetafieldController {
     }
 
     @DeleteMapping("/metafield/{id}")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Void> delete(@PathVariable Long id) {
         mapper.deleteById(id);
         return Result.ok();

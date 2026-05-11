@@ -65,6 +65,7 @@ public class ProductImageController {
 
     /** 列表（前端 PENDING 状态轮询用） */
     @GetMapping("/product/{productId}/image")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<List<ProductImage>> list(@PathVariable Long productId) {
         return Result.ok(mapper.selectList(new QueryWrapper<ProductImage>()
             .eq("product_id", productId)
@@ -84,6 +85,7 @@ public class ProductImageController {
      * </ul>
      */
     @PostMapping("/product/{productId}/image/upload")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Map<String, Object>> upload(
         @PathVariable Long productId,
         @RequestParam("file") MultipartFile file,
@@ -159,6 +161,7 @@ public class ProductImageController {
     }
 
     @DeleteMapping("/product-image/{id}")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Void> delete(@PathVariable Long id) {
         ProductImage img = mapper.selectById(id);
         if (img == null) throw new BusinessException(ResultCode.NOT_FOUND);

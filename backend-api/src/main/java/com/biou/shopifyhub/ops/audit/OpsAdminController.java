@@ -9,6 +9,7 @@ import com.biou.shopifyhub.core.metrics.MetricsRegistry;
 import com.biou.shopifyhub.file.FileService;
 import com.biou.shopifyhub.ops.audit.entity.AuditArchiveLog;
 import com.biou.shopifyhub.ops.audit.mapper.AuditArchiveLogMapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,6 +31,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/admin")
+@PreAuthorize("hasRole('PLATFORM_SUPER')")
 public class OpsAdminController {
 
     private final AuditArchiveLogMapper archiveMapper;

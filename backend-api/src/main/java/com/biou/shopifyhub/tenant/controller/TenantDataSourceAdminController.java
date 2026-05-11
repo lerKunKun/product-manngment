@@ -12,6 +12,7 @@ import com.biou.shopifyhub.tenant.mapper.SysTenantDatasourceMapper;
 import com.biou.shopifyhub.tenant.mapper.SysTenantMapper;
 import com.biou.shopifyhub.tenant.service.TenantDataSourceManager;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,6 +37,7 @@ import java.util.Set;
  */
 @RestController
 @RequestMapping("/admin/tenant/datasource-admin")
+@PreAuthorize("hasRole('PLATFORM_SUPER')")
 public class TenantDataSourceAdminController {
 
     private static final String PASSWORD_PLACEHOLDER = "****";

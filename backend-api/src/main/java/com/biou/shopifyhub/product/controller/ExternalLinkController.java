@@ -7,6 +7,7 @@ import com.biou.shopifyhub.core.ResultCode;
 import com.biou.shopifyhub.core.exception.BusinessException;
 import com.biou.shopifyhub.product.entity.ProductExternalLink;
 import com.biou.shopifyhub.product.mapper.ProductExternalLinkMapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -26,6 +27,7 @@ public class ExternalLinkController {
     }
 
     @GetMapping("/product/{productId}/external-link")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<List<ProductExternalLink>> list(@PathVariable Long productId) {
         return Result.ok(mapper.selectList(new QueryWrapper<ProductExternalLink>()
             .eq("product_id", productId)
@@ -33,6 +35,7 @@ public class ExternalLinkController {
     }
 
     @PostMapping("/product/{productId}/external-link")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Map<String, Long>> create(@PathVariable Long productId, @RequestBody ProductExternalLink input) {
         validate(input);
         Long uid = CurrentUser.userIdOrNull();
@@ -45,6 +48,7 @@ public class ExternalLinkController {
     }
 
     @PutMapping("/external-link/{id}")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Void> update(@PathVariable Long id, @RequestBody ProductExternalLink patch) {
         ProductExternalLink cur = mapper.selectById(id);
         if (cur == null) throw new BusinessException(ResultCode.NOT_FOUND);
@@ -60,6 +64,7 @@ public class ExternalLinkController {
     }
 
     @DeleteMapping("/external-link/{id}")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:WRITE')")
     public Result<Void> delete(@PathVariable Long id) {
         mapper.deleteById(id);
         return Result.ok();

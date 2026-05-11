@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.biou.shopifyhub.core.Result;
 import com.biou.shopifyhub.product.entity.ProductOption;
 import com.biou.shopifyhub.product.mapper.ProductOptionMapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,6 +25,7 @@ public class ProductOptionController {
     }
 
     @GetMapping("/product/{productId}/option")
+    @PreAuthorize("hasAuthority('PERM_PRODUCT:READ')")
     public Result<List<ProductOption>> list(@PathVariable Long productId) {
         return Result.ok(mapper.selectList(new QueryWrapper<ProductOption>()
             .eq("product_id", productId)
