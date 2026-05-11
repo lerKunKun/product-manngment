@@ -205,6 +205,19 @@ public class InvitationServiceImpl implements InvitationService {
             throw new BusinessException(ResultCode.INVITATION_PASSWORD_MISMATCH);
         }
 
+        // Preflight #1：邮箱已被注册为系统 username 时直接拒。
+        // 否则 userMapper.insert 会因 sys_user.username UNIQUE 抛 DuplicateKeyException，
+        // @Transactional 回滚后 invitation 仍是 PENDING —— token 可被无限重放。
+        assertUsernameAvailable(inv.getEmail());
+
+        // Preflight #2：原子推进 PENDING→ACCEPTED 抢占。
+        // 两个并发 accept 都通过了顶部的 status 校验也无所谓，只有一个能抢到这步；
+        // 抢失败的请求直接返回"已接受"，不会再创建第二个用户。
+        LocalDateTime now = LocalDateTime.now();
+        if (!claimInvitation(inv.getId(), now)) {
+            throw new BusinessException(ResultCode.INVITATION_ALREADY_ACCEPTED);
+        }
+
         // 创建用户：employee_no 基于 invitation.id 生成，保证全局唯一 + 进程重启幂等
         SysUser u = new SysUser();
         u.setEmployeeNo("TMP" + String.format("%06d", inv.getId()));
@@ -252,11 +265,9 @@ public class InvitationServiceImpl implements InvitationService {
             dataScopeMapper.insert(ds);
         }
 
-        // 标记邀请已接受
+        // 回填 created_user_id（status / accepted_at 在 claimInvitation 时已落库）
         UserInvitation upd = new UserInvitation();
         upd.setId(inv.getId());
-        upd.setStatus("ACCEPTED");
-        upd.setAcceptedAt(LocalDateTime.now());
         upd.setCreatedUserId(u.getId());
         invitationMapper.updateById(upd);
 
@@ -372,6 +383,37 @@ public class InvitationServiceImpl implements InvitationService {
     }
 
     // ===== helpers =====
+
+    /**
+     * 邮箱已被注册为 sys_user.username 时拒绝接受邀请。
+     *
+     * <p>这是接受邀请的 preflight：如果不拦在这一步，后续 userMapper.insert 会触发
+     * sys_user.username UNIQUE 索引冲突抛 DuplicateKeyException，@Transactional 回滚
+     * 后邀请回到 PENDING 状态 —— 同一 token 可被无限重放（每次都失败、每次都让邀请
+     * 重置回可接受）。
+     */
+    void assertUsernameAvailable(String email) {
+        Long taken = userMapper.selectCount(new QueryWrapper<SysUser>().eq("username", email));
+        if (taken != null && taken > 0) {
+            throw new BusinessException(ResultCode.INVITATION_USERNAME_TAKEN, email);
+        }
+    }
+
+    /**
+     * 原子推进 PENDING→ACCEPTED 并落 accepted_at。返回是否抢占成功。
+     *
+     * <p>用条件 UPDATE 而不是 updateById：两个并发 accept 即使都通过了内存里的 status
+     * 校验，DB 这一步只有一个能 hit 到 status='PENDING' 行，另一个 updated=0。
+     * 抢占失败的请求不会进入用户创建流程，避免产生重复 SysUser。
+     */
+    boolean claimInvitation(Long invitationId, LocalDateTime acceptedAt) {
+        int updated = invitationMapper.update(null, new UpdateWrapper<UserInvitation>()
+            .eq("id", invitationId)
+            .eq("status", "PENDING")
+            .set("status", "ACCEPTED")
+            .set("accepted_at", acceptedAt));
+        return updated > 0;
+    }
 
     private UserInvitation findByTokenOrThrow(String token) {
         UserInvitation inv = invitationMapper.selectOne(new QueryWrapper<UserInvitation>()
