@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { invitationApi, type InvitationPreview } from "@/lib/api/invitation";
 import { ApiError } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/auth/store";
 
 type Phase = "loading" | "ready" | "submitting" | "success" | "error";
 
@@ -56,9 +57,21 @@ function Inner() {
     setPhase("submitting");
     try {
       await invitationApi.accept(token, tempPassword);
+      // 清掉浏览器里可能残留的旧登录态（典型场景：admin 在自己浏览器接受自己发的邀请）。
+      // 后端会顺带下发 Set-Cookie 把 shub_refresh httpOnly cookie 也 Max-Age=0 抹掉。
+      useAuthStore.getState().clear();
+      try {
+        localStorage.removeItem("shub-auth");
+      } catch {
+        /* ignore */
+      }
       setPhase("success");
-      // TODO: W1-AUTH 完成后改成跳"修改密码"页 + 携带 JWT
-      setTimeout(() => router.push("/"), 2000);
+      const email = preview?.email ?? "";
+      setTimeout(() => {
+        const qs = new URLSearchParams({ from: "invite" });
+        if (email) qs.set("email", email);
+        router.replace(`/login?${qs.toString()}`);
+      }, 1800);
     } catch (e) {
       setPhase("ready");
       setError((e as ApiError).message);
@@ -150,7 +163,9 @@ function Inner() {
               <CheckCircle2 className="h-4 w-4" />
               邀请已接受
             </p>
-            <p className="text-xs text-emerald-700">即将跳转...</p>
+            <p className="text-xs text-emerald-700">
+              即将跳转到登录页，请用邮箱 + 刚才输入的临时密码登录。
+            </p>
           </div>
         )}
       </div>
