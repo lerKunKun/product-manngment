@@ -76,6 +76,17 @@ class InvitationServiceImplRoleCeilingTest {
     }
 
     @Test
+    void passes_for_invitation_only_role_even_if_inviter_does_not_hold_it() {
+        // TEMP_STAFF 是邀请专用标识角色，邀请人本身不会持有 ——
+        // 邀请必须能下发，否则邀请流程整个不能用
+        when(rbac.loadRoles(7L)).thenReturn(List.of("COMPANY_ADMIN", "OPERATION"));
+
+        assertThatCode(() ->
+            service.assertCanGrantRoles(7L, List.of("TEMP_STAFF", "OPERATION"))
+        ).doesNotThrowAnyException();
+    }
+
+    @Test
     void rejects_empty_role_list() {
         Throwable ex = catchThrowable(() -> service.assertCanGrantRoles(7L, List.of()));
         assertThat(ex).isInstanceOf(BusinessException.class);

@@ -66,6 +66,13 @@ public class InvitationServiceImpl implements InvitationService {
     /** 邀请绝不允许传播的角色码（即便邀请人自身持有也不行）。 */
     private static final Set<String> ROLE_BLACKLIST = Set.of("PLATFORM_SUPER");
 
+    /**
+     * 邀请专用角色：按 RBAC seed 设计就是"被邀请人才会持有"的标识角色（自身不带权限，
+     * 权限由邀请时附加的其它角色聚合）。邀请人本身不持有这些角色，但邀请必须能下发。
+     * 这道白名单豁免"⊆ 邀请人角色"上限规则，黑名单仍然管着。
+     */
+    private static final Set<String> INVITATION_ONLY_ROLES = Set.of("TEMP_STAFF");
+
     public InvitationServiceImpl(
         UserInvitationMapper invitationMapper,
         SysUserMapper userMapper,
@@ -398,11 +405,14 @@ public class InvitationServiceImpl implements InvitationService {
     // ===== helpers =====
 
     /**
-     * 邀请角色上限校验。两条规则：
+     * 邀请角色上限校验。三条规则按优先级排：
      * 1) 黑名单：{@link #ROLE_BLACKLIST} 里的角色（PLATFORM_SUPER）一律不可通过邀请传播 ——
      *    即便邀请人自身是超管，也必须经手动 sys_user_role 授予，不走邀请通道。
-     * 2) 上限规则：被邀请人的 roleCodes 必须 ⊆ 邀请人自身当前持有的角色集合。
-     *    防止低权 admin 越权下发自己没有的角色给被邀请人。
+     * 2) 邀请专用角色白名单：{@link #INVITATION_ONLY_ROLES}（如 TEMP_STAFF）按 RBAC seed
+     *    设计就是被邀请人才会持有的标识角色，邀请人自身不持有但邀请必须能下发，所以豁免下面
+     *    的"⊆ 邀请人角色"规则。它们本身不带权限，权限由邀请时附加的其它角色聚合。
+     * 3) 上限规则：其余 roleCodes 必须 ⊆ 邀请人自身当前持有的角色集合，防止低权 admin
+     *    越权下发自己没有的角色给被邀请人。
      *
      * <p>仅做角色集合校验，data scope 上限放在 follow-up PR 处理。
      */
@@ -418,6 +428,7 @@ public class InvitationServiceImpl implements InvitationService {
         }
         Set<String> inviterRoles = new HashSet<>(rbac.loadRoles(inviterUserId));
         for (String code : requestedCodes) {
+            if (INVITATION_ONLY_ROLES.contains(code)) continue; // 邀请专用标识角色，豁免上限规则
             if (!inviterRoles.contains(code)) {
                 throw new BusinessException(ResultCode.INVITATION_ROLE_NOT_ALLOWED,
                     "无权授予角色：" + code);
