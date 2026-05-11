@@ -2,11 +2,13 @@ package com.biou.shopifyhub.invitation.controller;
 
 import com.biou.shopifyhub.core.CurrentUser;
 import com.biou.shopifyhub.core.Result;
+import com.biou.shopifyhub.core.security.CookieUtil;
 import com.biou.shopifyhub.invitation.dto.InvitationAcceptRequest;
 import com.biou.shopifyhub.invitation.dto.InvitationCreateRequest;
 import com.biou.shopifyhub.invitation.dto.InvitationListItem;
 import com.biou.shopifyhub.invitation.dto.InvitationPreviewResponse;
 import com.biou.shopifyhub.invitation.service.InvitationService;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -19,9 +21,11 @@ import java.util.Map;
 public class InvitationController {
 
     private final InvitationService service;
+    private final CookieUtil cookieUtil;
 
-    public InvitationController(InvitationService service) {
+    public InvitationController(InvitationService service, CookieUtil cookieUtil) {
         this.service = service;
+        this.cookieUtil = cookieUtil;
     }
 
     /** 列表（PENDING / ACCEPTED / REVOKED / LINK_EXPIRED）。 */
@@ -46,9 +50,14 @@ public class InvitationController {
     }
 
     @PostMapping("/accept")
-    public Result<Map<String, Long>> accept(@Valid @RequestBody InvitationAcceptRequest req) {
+    public Result<Map<String, Long>> accept(@Valid @RequestBody InvitationAcceptRequest req,
+                                            HttpServletResponse resp) {
         Long userId = service.accept(req);
+        // 抹掉调用方浏览器可能携带的旧 refresh cookie（典型场景：admin 在同一浏览器里
+        // 点了自己发出的邀请链接来接受 —— 不清就会导致接受成功后旧 admin session
+        // 借 refresh cookie 自动续期，前端看起来"接受邀请却进了 admin 后台"）。
         // TODO: W1-AUTH 完整后此处直接签发 JWT 返回，免登录
+        cookieUtil.clearRefresh(resp);
         return Result.ok(Map.of("userId", userId));
     }
 

@@ -1,19 +1,37 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { authApi } from "@/lib/api/auth";
 import { useAuthStore } from "@/lib/auth/store";
 import type { ApiError } from "@/lib/api/client";
 import { useI18n } from "@/lib/i18n/context";
 
 export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+          加载中...
+        </main>
+      }
+    >
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+function LoginInner() {
   const router = useRouter();
+  const params = useSearchParams();
   const { t } = useI18n();
   const setSession = useAuthStore((s) => s.setSession);
 
+  const fromInvite = params.get("from") === "invite";
+  const prefillEmail = params.get("email") ?? "";
+
   const [tab, setTab] = useState<"password" | "dingtalk">("password");
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState(prefillEmail || "admin");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -66,6 +84,12 @@ export default function LoginPage() {
         <p className="mb-6 text-xs text-muted-foreground">
           Biou × Shopify Control Center
         </p>
+
+        {fromInvite && (
+          <div className="mb-5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+            邀请已接受，请用邮箱 + 邮件中的临时密码登录。
+          </div>
+        )}
 
         <div className="mb-5 flex border-b text-sm">
           {(["password", "dingtalk"] as const).map((k) => (
