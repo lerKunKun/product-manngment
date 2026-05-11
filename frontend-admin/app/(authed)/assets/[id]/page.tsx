@@ -29,12 +29,59 @@ const SEGMENT_LABEL: Record<string, string> = {
   collection: "集合",
 };
 
+type Category = "theme" | "image" | "video" | "font" | "data" | "other";
+
+const CATEGORY_LABEL: Record<Category, string> = {
+  theme: "主题代码",
+  image: "图片",
+  video: "视频",
+  font: "字体",
+  data: "数据 JSON",
+  other: "其他",
+};
+
+/** Tab 显示顺序；"全部"由 UI 单独处理。 */
+const CATEGORY_ORDER: Category[] = ["theme", "image", "video", "font", "data", "other"];
+
+const PAGE_SIZE = 50;
+
+/**
+ * 按文件路径 + MIME 推断类别。规则按优先级匹配：
+ *  - 主题代码：路径含 sections/snippets/templates/config/layout/locales 或 .liquid 后缀；
+ *              或 theme/assets/ 下的 css/js/scss（主题样式与脚本）
+ *  - 图片 / 视频 / 字体：先看 MIME 前缀，回落到扩展名匹配
+ *  - 数据 JSON：剩下的 .json（产品/店铺设置/metafield/菜单/政策/集合等业务数据）
+ *  - 其他：兜底（少量 README / 未知二进制）
+ */
+function classify(path: string, mime?: string | null): Category {
+  const lower = (path || "").toLowerCase();
+  const m = (mime || "").toLowerCase();
+
+  const inThemeDir = /(^|\/)(sections|snippets|templates|config|layout|locales)\//.test(lower);
+  if (inThemeDir || lower.endsWith(".liquid")) return "theme";
+  if (/(^|\/)assets\//.test(lower) && /\.(css|js|mjs|scss|sass|map)$/.test(lower)) return "theme";
+
+  if (m.startsWith("image/") || /\.(jpe?g|png|gif|webp|svg|ico|bmp|avif|tiff?)$/.test(lower)) {
+    return "image";
+  }
+  if (m.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi|mkv|ogv)$/.test(lower)) {
+    return "video";
+  }
+  if (m.startsWith("font/") || m.includes("font") || /\.(woff2?|ttf|otf|eot)$/.test(lower)) {
+    return "font";
+  }
+  if (lower.endsWith(".json")) return "data";
+
+  return "other";
+}
+
 type FlatEntry = {
   segment: string;
   relativePath: string;
   sha256: string;
   size?: number;
   contentType?: string | null;
+  category: Category;
 };
 
 export default function AssetSnapshotDetailPage() {
@@ -53,6 +100,11 @@ export default function AssetSnapshotDetailPage() {
 
   const [manifest, setManifest] = useState<unknown>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
+
+  /** 当前激活的分类 tab；null = "全部"。 */
+  const [activeCategory, setActiveCategory] = useState<Category | null>(null);
+  /** 当前页码（1-based）。切换分类时会自动回 1。 */
+  const [page, setPage] = useState(1);
 
   async function load() {
     setLoading(true);
@@ -76,7 +128,7 @@ export default function AssetSnapshotDetailPage() {
     }
   }
 
-  /** 展平 segments → [{segment, relativePath, sha256, size, contentType}] */
+  /** 展平 segments → [{segment, relativePath, sha256, size, contentType, category}] */
   const flatEntries: FlatEntry[] = useMemo(() => {
     if (!manifests?.segments) return [];
     const out: FlatEntry[] = [];
@@ -91,11 +143,42 @@ export default function AssetSnapshotDetailPage() {
           sha256: e.sha256,
           size: e.size,
           contentType: e.content_type,
+          category: classify(e.relative_path, e.content_type),
         });
       }
     }
     return out;
   }, [manifests]);
+
+  /** 每个分类的条目数（用于 tab 标签上的 count 徽章）。 */
+  const categoryCounts = useMemo(() => {
+    const counts: Record<Category, number> = {
+      theme: 0, image: 0, video: 0, font: 0, data: 0, other: 0,
+    };
+    for (const e of flatEntries) counts[e.category]++;
+    return counts;
+  }, [flatEntries]);
+
+  /** 当前 tab 过滤后的条目集合（不分页）。 */
+  const filteredEntries = useMemo(() => {
+    if (activeCategory === null) return flatEntries;
+    return flatEntries.filter((e) => e.category === activeCategory);
+  }, [flatEntries, activeCategory]);
+
+  /** 总页数（至少 1，避免空数据时显示 "0 / 0"）。 */
+  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / PAGE_SIZE));
+  /** 当前页对应的切片。page 超界时夹紧到 1。 */
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pagedEntries = useMemo(
+    () => filteredEntries.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filteredEntries, safePage]
+  );
+
+  /** 切换 tab 时回到第 1 页 */
+  function selectCategory(c: Category | null) {
+    setActiveCategory(c);
+    setPage(1);
+  }
 
   async function loadManifest() {
     setManifestLoading(true);
@@ -212,38 +295,99 @@ export default function AssetSnapshotDetailPage() {
             正在读取各段 manifest...
           </div>
         ) : flatEntries.length > 0 ? (
-          <div className="overflow-auto rounded border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
-                <tr>
-                  <th className="px-2 py-1.5 text-left">段</th>
-                  <th className="px-2 py-1.5 text-left">路径</th>
-                  <th className="px-2 py-1.5 text-left">MIME</th>
-                  <th className="px-2 py-1.5 text-right">大小</th>
-                  <th className="px-2 py-1.5 text-left">SHA-256</th>
-                </tr>
-              </thead>
-              <tbody>
-                {flatEntries.map((e, i) => (
-                  <tr key={i} className="border-t hover:bg-muted/30">
-                    <td className="px-2 py-1.5 text-xs">
-                      <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-                        {SEGMENT_LABEL[e.segment] ?? e.segment}
-                      </span>
-                    </td>
-                    <td className="px-2 py-1.5 font-mono text-xs">{e.relativePath}</td>
-                    <td className="px-2 py-1.5 text-xs text-muted-foreground">
-                      {e.contentType || "-"}
-                    </td>
-                    <td className="px-2 py-1.5 text-right">{humanBytes(e.size)}</td>
-                    <td className="px-2 py-1.5 font-mono text-[10px] text-muted-foreground" title={e.sha256}>
-                      {e.sha256 ? e.sha256.substring(0, 12) + "…" : "-"}
-                    </td>
+          <>
+            {/* 分类 tabs */}
+            <div className="mb-3 flex flex-wrap gap-1.5 text-xs">
+              <CategoryTab
+                label="全部"
+                count={flatEntries.length}
+                active={activeCategory === null}
+                onClick={() => selectCategory(null)}
+              />
+              {CATEGORY_ORDER.map((c) => (
+                <CategoryTab
+                  key={c}
+                  label={CATEGORY_LABEL[c]}
+                  count={categoryCounts[c]}
+                  active={activeCategory === c}
+                  onClick={() => selectCategory(c)}
+                  disabled={categoryCounts[c] === 0}
+                />
+              ))}
+            </div>
+
+            <div className="overflow-auto rounded border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-2 py-1.5 text-left">段</th>
+                    <th className="px-2 py-1.5 text-left">路径</th>
+                    <th className="px-2 py-1.5 text-left">MIME</th>
+                    <th className="px-2 py-1.5 text-right">大小</th>
+                    <th className="px-2 py-1.5 text-left">SHA-256</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pagedEntries.map((e, i) => (
+                    <tr key={i} className="border-t hover:bg-muted/30">
+                      <td className="px-2 py-1.5 text-xs">
+                        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                          {SEGMENT_LABEL[e.segment] ?? e.segment}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 font-mono text-xs">{e.relativePath}</td>
+                      <td className="px-2 py-1.5 text-xs text-muted-foreground">
+                        {e.contentType || "-"}
+                      </td>
+                      <td className="px-2 py-1.5 text-right">{humanBytes(e.size)}</td>
+                      <td className="px-2 py-1.5 font-mono text-[10px] text-muted-foreground" title={e.sha256}>
+                        {e.sha256 ? e.sha256.substring(0, 12) + "…" : "-"}
+                      </td>
+                    </tr>
+                  ))}
+                  {pagedEntries.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-2 py-6 text-center text-xs text-muted-foreground">
+                        当前分类下没有文件
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 分页器 */}
+            <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+              <div>
+                共 {filteredEntries.length} 条
+                {filteredEntries.length > 0 && (
+                  <>
+                    {" "}· 第 {(safePage - 1) * PAGE_SIZE + 1}–
+                    {Math.min(safePage * PAGE_SIZE, filteredEntries.length)} 条
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setPage(safePage - 1)}
+                  disabled={safePage <= 1}
+                  className="rounded border px-2 py-1 hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  上一页
+                </button>
+                <span className="px-1">
+                  第 {safePage} / {totalPages} 页
+                </span>
+                <button
+                  onClick={() => setPage(safePage + 1)}
+                  disabled={safePage >= totalPages}
+                  className="rounded border px-2 py-1 hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          </>
         ) : d.files && d.files.length > 0 ? (
           // 老快照（pre-AS2）asset_file 表回退展示
           <div className="overflow-auto rounded border">
@@ -319,5 +463,47 @@ function Field({
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className={mono ? "break-all font-mono text-xs" : "text-sm"}>{value}</dd>
     </div>
+  );
+}
+
+function CategoryTab({
+  label,
+  count,
+  active,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  // 空分类禁用 + 半透明，避免误点；激活态用 primary 高亮
+  const base =
+    "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 transition-colors";
+  const cls = active
+    ? "border-primary bg-primary text-primary-foreground"
+    : disabled
+      ? "border-zinc-200 text-zinc-400 cursor-not-allowed"
+      : "hover:bg-accent";
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      className={`${base} ${cls}`}
+    >
+      <span>{label}</span>
+      <span
+        className={
+          active
+            ? "rounded bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] font-mono"
+            : "rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
+        }
+      >
+        {count}
+      </span>
+    </button>
   );
 }
