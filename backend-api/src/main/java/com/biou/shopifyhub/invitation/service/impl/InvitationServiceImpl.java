@@ -25,6 +25,7 @@ import com.biou.shopifyhub.notification.EmailService;
 import com.biou.shopifyhub.notification.InvitationEmailRenderer;
 import com.biou.shopifyhub.notification.NotificationDispatcher;
 import com.biou.shopifyhub.notification.NotificationEventCode;
+import com.biou.shopifyhub.rbac.UserRolePermissionService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -37,7 +38,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class InvitationServiceImpl implements InvitationService {
@@ -55,9 +58,13 @@ public class InvitationServiceImpl implements InvitationService {
     private final EmailService emailService;
     private final InvitationEmailRenderer emailRenderer;
     private final NotificationDispatcher notifier;
+    private final UserRolePermissionService rbac;
 
     @Value("${APP_BRAND_NAME:Biou x Shopify Control Center}")
     private String brandName;
+
+    /** 邀请绝不允许传播的角色码（即便邀请人自身持有也不行）。 */
+    private static final Set<String> ROLE_BLACKLIST = Set.of("PLATFORM_SUPER");
 
     public InvitationServiceImpl(
         UserInvitationMapper invitationMapper,
@@ -69,7 +76,8 @@ public class InvitationServiceImpl implements InvitationService {
         InvitationTokenGenerator tokenGen,
         EmailService emailService,
         InvitationEmailRenderer emailRenderer,
-        NotificationDispatcher notifier
+        NotificationDispatcher notifier,
+        UserRolePermissionService rbac
     ) {
         this.invitationMapper = invitationMapper;
         this.userMapper = userMapper;
@@ -81,11 +89,16 @@ public class InvitationServiceImpl implements InvitationService {
         this.emailService = emailService;
         this.emailRenderer = emailRenderer;
         this.notifier = notifier;
+        this.rbac = rbac;
     }
 
     @Override
     @Transactional
     public Long create(InvitationCreateRequest req, Long invitedByUserId) {
+        // 角色上限：拒 PLATFORM_SUPER，且被邀请角色必须 ⊆ 邀请人自身角色
+        // 不前置这道校验，拥有 PERM_TEMP_USER:INVITE 的低权 admin 可以下发 ADMIN 角色给被邀请人。
+        assertCanGrantRoles(invitedByUserId, req.getRoleCodes());
+
         // 校验账号有效期 ∈ (now, now + maxAccountDays]
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime maxAllowed = now.plusDays(props.getMaxAccountDays());
@@ -372,6 +385,34 @@ public class InvitationServiceImpl implements InvitationService {
     }
 
     // ===== helpers =====
+
+    /**
+     * 邀请角色上限校验。两条规则：
+     * 1) 黑名单：{@link #ROLE_BLACKLIST} 里的角色（PLATFORM_SUPER）一律不可通过邀请传播 ——
+     *    即便邀请人自身是超管，也必须经手动 sys_user_role 授予，不走邀请通道。
+     * 2) 上限规则：被邀请人的 roleCodes 必须 ⊆ 邀请人自身当前持有的角色集合。
+     *    防止低权 admin 越权下发自己没有的角色给被邀请人。
+     *
+     * <p>仅做角色集合校验，data scope 上限放在 follow-up PR 处理。
+     */
+    void assertCanGrantRoles(Long inviterUserId, List<String> requestedCodes) {
+        if (requestedCodes == null || requestedCodes.isEmpty()) {
+            throw new BusinessException(ResultCode.VALIDATION_FAILED, "至少需要选择 1 个角色");
+        }
+        for (String code : requestedCodes) {
+            if (ROLE_BLACKLIST.contains(code)) {
+                throw new BusinessException(ResultCode.INVITATION_ROLE_NOT_ALLOWED,
+                    code + " 不可通过邀请授予");
+            }
+        }
+        Set<String> inviterRoles = new HashSet<>(rbac.loadRoles(inviterUserId));
+        for (String code : requestedCodes) {
+            if (!inviterRoles.contains(code)) {
+                throw new BusinessException(ResultCode.INVITATION_ROLE_NOT_ALLOWED,
+                    "无权授予角色：" + code);
+            }
+        }
+    }
 
     private UserInvitation findByTokenOrThrow(String token) {
         UserInvitation inv = invitationMapper.selectOne(new QueryWrapper<UserInvitation>()
