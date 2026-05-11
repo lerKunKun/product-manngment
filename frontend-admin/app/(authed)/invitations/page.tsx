@@ -12,6 +12,21 @@ const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
   REVOKED: { text: "已撤销", cls: "bg-zinc-100 text-zinc-500 border-zinc-300" },
 };
 
+/** 已接受邀请下，被邀请人的当前账号状态。三种可视化：在岗 / 已注销 / 已删除。 */
+function accountBadge(it: InvitationListItem): { text: string; cls: string } | null {
+  if (it.status !== "ACCEPTED") return null;
+  if (it.userDeletedAt) {
+    return { text: "已删除", cls: "bg-zinc-100 text-zinc-500 border-zinc-300" };
+  }
+  if (it.userStatus === "EXPIRED" || it.userStatus === "FROZEN") {
+    return { text: "已注销", cls: "bg-zinc-100 text-zinc-500 border-zinc-300" };
+  }
+  if (it.userStatus === "ACTIVE") {
+    return { text: "在岗", cls: "bg-sky-100 text-sky-900 border-sky-300" };
+  }
+  return null;
+}
+
 export default function InvitationsPage() {
   const [list, setList] = useState<InvitationListItem[]>([]);
   const [filter, setFilter] = useState<string>("");
@@ -116,14 +131,28 @@ export default function InvitationsPage() {
             )}
             {list.map((it) => {
               const s = STATUS_LABEL[it.status] ?? STATUS_LABEL.REVOKED;
+              const acct = accountBadge(it);
+              // 注销按钮只在「邀请已接受 + 账号当前在岗」时显示；已注销/已删除的账号不再有可注销动作
+              const showRevokeUser =
+                it.status === "ACCEPTED" &&
+                it.createdUserId != null &&
+                !it.userDeletedAt &&
+                it.userStatus === "ACTIVE";
               return (
                 <tr key={it.id} className="border-t">
                   <td className="px-3 py-2">{it.id}</td>
                   <td className="px-3 py-2 font-mono text-xs">{it.email}</td>
                   <td className="px-3 py-2">
-                    <span className={"inline-block rounded border px-2 py-0.5 text-xs " + s.cls}>
-                      {s.text}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className={"inline-block rounded border px-2 py-0.5 text-xs " + s.cls}>
+                        {s.text}
+                      </span>
+                      {acct && (
+                        <span className={"inline-block rounded border px-2 py-0.5 text-xs " + acct.cls}>
+                          {acct.text}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">
                     {new Date(it.invitedAt).toLocaleString("zh-CN")}
@@ -143,7 +172,7 @@ export default function InvitationsPage() {
                         撤销
                       </button>
                     )}
-                    {it.status === "ACCEPTED" && it.createdUserId && (
+                    {showRevokeUser && (
                       <button
                         onClick={() => revokeUser(it.createdUserId!)}
                         className="rounded border px-2 py-1 text-xs hover:bg-accent"

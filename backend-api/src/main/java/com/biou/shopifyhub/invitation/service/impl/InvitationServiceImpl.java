@@ -31,16 +31,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class InvitationServiceImpl implements InvitationService {
@@ -59,6 +64,7 @@ public class InvitationServiceImpl implements InvitationService {
     private final InvitationEmailRenderer emailRenderer;
     private final NotificationDispatcher notifier;
     private final UserRolePermissionService rbac;
+    private final JdbcTemplate jdbc;
 
     @Value("${APP_BRAND_NAME:Biou x Shopify Control Center}")
     private String brandName;
@@ -84,7 +90,8 @@ public class InvitationServiceImpl implements InvitationService {
         EmailService emailService,
         InvitationEmailRenderer emailRenderer,
         NotificationDispatcher notifier,
-        UserRolePermissionService rbac
+        UserRolePermissionService rbac,
+        JdbcTemplate jdbc
     ) {
         this.invitationMapper = invitationMapper;
         this.userMapper = userMapper;
@@ -97,6 +104,7 @@ public class InvitationServiceImpl implements InvitationService {
         this.emailRenderer = emailRenderer;
         this.notifier = notifier;
         this.rbac = rbac;
+        this.jdbc = jdbc;
     }
 
     @Override
@@ -179,7 +187,18 @@ public class InvitationServiceImpl implements InvitationService {
         QueryWrapper<UserInvitation> q = new QueryWrapper<UserInvitation>().orderByDesc("invited_at");
         if (statusFilter != null && !statusFilter.isBlank()) q.eq("status", statusFilter);
         // Wave 1 后期：按 viewer 的角色范围过滤；当前所有 PLATFORM_SUPER 行为
-        return invitationMapper.selectList(q).stream().map(inv -> {
+        List<UserInvitation> rows = invitationMapper.selectList(q);
+
+        // 一次性查 sys_user 的当前 status + deleted_at；用裸 JDBC 绕过 MyBatis-Plus 的逻辑删除
+        // 过滤（@TableLogic 会让 selectById 看不到 deleted_at != NULL 的行，但前端要展示"已注销"）
+        List<Long> userIds = rows.stream()
+            .map(UserInvitation::getCreatedUserId)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+        Map<Long, UserStatusRow> userInfo = userIds.isEmpty() ? Map.of() : loadUserStatusBypassingLogicDelete(userIds);
+
+        return rows.stream().map(inv -> {
             InvitationListItem dto = new InvitationListItem();
             dto.setId(inv.getId());
             dto.setEmail(inv.getEmail());
@@ -190,8 +209,33 @@ public class InvitationServiceImpl implements InvitationService {
             dto.setAcceptedAt(inv.getAcceptedAt());
             dto.setInvitedBy(inv.getInvitedBy());
             dto.setCreatedUserId(inv.getCreatedUserId());
+            UserStatusRow u = inv.getCreatedUserId() == null ? null : userInfo.get(inv.getCreatedUserId());
+            if (u != null) {
+                dto.setUserStatus(u.status);
+                dto.setUserDeletedAt(u.deletedAt);
+            }
             return dto;
         }).toList();
+    }
+
+    /** sys_user.status + deleted_at 批量查，无视 @TableLogic 过滤（裸 SQL）。 */
+    private Map<Long, UserStatusRow> loadUserStatusBypassingLogicDelete(List<Long> userIds) {
+        String placeholders = userIds.stream().map(i -> "?").collect(Collectors.joining(","));
+        String sql = "SELECT id, status, deleted_at FROM sys_user WHERE id IN (" + placeholders + ")";
+        Map<Long, UserStatusRow> out = new HashMap<>();
+        jdbc.query(sql, rs -> {
+            UserStatusRow r = new UserStatusRow();
+            r.status = rs.getString("status");
+            Timestamp ts = rs.getTimestamp("deleted_at");
+            r.deletedAt = ts == null ? null : ts.toLocalDateTime();
+            out.put(rs.getLong("id"), r);
+        }, userIds.toArray());
+        return out;
+    }
+
+    private static final class UserStatusRow {
+        String status;
+        LocalDateTime deletedAt;
     }
 
     @Override

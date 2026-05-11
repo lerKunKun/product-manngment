@@ -20,6 +20,10 @@ export type InvitationListItem = {
   acceptedAt?: string;
   invitedBy?: number;
   createdUserId?: number;
+  /** 仅 ACCEPTED 时有值：被邀请人当前 sys_user.status */
+  userStatus?: "ACTIVE" | "FROZEN" | "EXPIRED" | "DELETED";
+  /** 仅 ACCEPTED 时有值：被邀请人被 soft-delete 时间戳；null=未删 */
+  userDeletedAt?: string;
 };
 
 export type InvitationCreateRequest = {

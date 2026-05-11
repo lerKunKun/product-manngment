@@ -152,17 +152,29 @@ export type ProductDoc = {
   scanStatus?: "NOT_SCANNED" | "CLEAN" | "INFECTED" | "FAILED";
 };
 
-function authedFetch(path: string, init: RequestInit = {}) {
-  const token =
-    typeof window === "undefined"
-      ? null
-      : (() => {
-          try {
-            return JSON.parse(localStorage.getItem("shub-auth") ?? "{}").state?.accessToken ?? null;
-          } catch {
-            return null;
-          }
-        })();
+/**
+ * 拿 access token：走 zustand store 的内存值。
+ *
+ * 这个 helper 之前从 localStorage 的 `shub-auth` 读 `state.accessToken`，但 store 配的
+ * `partialize: (s) => ({ user: s.user })` 故意只持久化 user、access token 仅内存（防 XSS），
+ * 所以 localStorage 那条永远拿不到 token —— multipart 上传请求被无声地不带 Authorization
+ * 发出去，后端 SecurityContext 为空，@PreAuthorize 拒时被 ExceptionTranslationFilter
+ * 当成 anonymous 返 401，前端看到的是「未登录或登录已过期」。
+ *
+ * 用动态 import 避免顶部循环依赖（store.ts 反过来 configureApi("./client")）。
+ */
+async function getAccessToken(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  try {
+    const mod = await import("@/lib/auth/store");
+    return mod.useAuthStore.getState().accessToken;
+  } catch {
+    return null;
+  }
+}
+
+async function authedFetch(path: string, init: RequestInit = {}) {
+  const token = await getAccessToken();
   const headers: Record<string, string> = {
     ...((init.headers as Record<string, string>) ?? {}),
   };
