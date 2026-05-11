@@ -12,7 +12,8 @@ import {
 import {
   assetApi,
   parseSyncErrors,
-  type SnapshotManifests,
+  type FilesPage,
+  type FilesPageItem,
 } from "@/lib/api/asset";
 import { LoadingBlock, ErrorBanner, EmptyState } from "@/components/ui/StatusBlocks";
 import { useToast } from "@/components/ui/Toast";
@@ -29,7 +30,7 @@ const SEGMENT_LABEL: Record<string, string> = {
   collection: "集合",
 };
 
-type Category = "theme" | "image" | "video" | "font" | "data" | "other";
+type Category = FilesPageItem["category"];
 
 const CATEGORY_LABEL: Record<Category, string> = {
   theme: "主题代码",
@@ -45,45 +46,6 @@ const CATEGORY_ORDER: Category[] = ["theme", "image", "video", "font", "data", "
 
 const PAGE_SIZE = 50;
 
-/**
- * 按文件路径 + MIME 推断类别。规则按优先级匹配：
- *  - 主题代码：路径含 sections/snippets/templates/config/layout/locales 或 .liquid 后缀；
- *              或 theme/assets/ 下的 css/js/scss（主题样式与脚本）
- *  - 图片 / 视频 / 字体：先看 MIME 前缀，回落到扩展名匹配
- *  - 数据 JSON：剩下的 .json（产品/店铺设置/metafield/菜单/政策/集合等业务数据）
- *  - 其他：兜底（少量 README / 未知二进制）
- */
-function classify(path: string, mime?: string | null): Category {
-  const lower = (path || "").toLowerCase();
-  const m = (mime || "").toLowerCase();
-
-  const inThemeDir = /(^|\/)(sections|snippets|templates|config|layout|locales)\//.test(lower);
-  if (inThemeDir || lower.endsWith(".liquid")) return "theme";
-  if (/(^|\/)assets\//.test(lower) && /\.(css|js|mjs|scss|sass|map)$/.test(lower)) return "theme";
-
-  if (m.startsWith("image/") || /\.(jpe?g|png|gif|webp|svg|ico|bmp|avif|tiff?)$/.test(lower)) {
-    return "image";
-  }
-  if (m.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi|mkv|ogv)$/.test(lower)) {
-    return "video";
-  }
-  if (m.startsWith("font/") || m.includes("font") || /\.(woff2?|ttf|otf|eot)$/.test(lower)) {
-    return "font";
-  }
-  if (lower.endsWith(".json")) return "data";
-
-  return "other";
-}
-
-type FlatEntry = {
-  segment: string;
-  relativePath: string;
-  sha256: string;
-  size?: number;
-  contentType?: string | null;
-  category: Category;
-};
-
 export default function AssetSnapshotDetailPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
@@ -93,10 +55,10 @@ export default function AssetSnapshotDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  /** AS3 之后 worker 按段写 manifest.json，不再回写 asset_file 表，
-   *  详情页改用 /manifests 一次拿所有段，前端展平显示。 */
-  const [manifests, setManifests] = useState<SnapshotManifests | null>(null);
-  const [manifestsLoading, setManifestsLoading] = useState(false);
+  /** AS3 之后 worker 按段写 manifest.json；本页改用 /files-page 端点走 DB 分页，
+   *  首次访问时后端会从 R2 manifest 懒填充到 asset_snapshot_entry，后续请求纯 SQL。 */
+  const [filesPage, setFilesPage] = useState<FilesPage | null>(null);
+  const [filesLoading, setFilesLoading] = useState(false);
 
   const [manifest, setManifest] = useState<unknown>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
@@ -117,62 +79,55 @@ export default function AssetSnapshotDetailPage() {
     } finally {
       setLoading(false);
     }
-    setManifestsLoading(true);
+  }
+
+  /** 拉当前 tab + 当前页的文件 entries。切 tab/翻页都会触发。 */
+  async function loadFilesPage() {
+    setFilesLoading(true);
     try {
-      const m = await assetApi.manifests(id);
-      setManifests(m);
+      const r = await assetApi.filesPage(id, {
+        category: activeCategory ?? undefined,
+        page,
+        size: PAGE_SIZE,
+      });
+      setFilesPage(r);
     } catch {
       // 段未生成（早期 snapshot 或 RUNNING 中）— 不报错，下方显示 fallback
+      setFilesPage(null);
     } finally {
-      setManifestsLoading(false);
+      setFilesLoading(false);
     }
   }
 
-  /** 展平 segments → [{segment, relativePath, sha256, size, contentType, category}] */
-  const flatEntries: FlatEntry[] = useMemo(() => {
-    if (!manifests?.segments) return [];
-    const out: FlatEntry[] = [];
-    for (const [seg, data] of Object.entries(manifests.segments)) {
-      const entries = (data.entries as
-        | { relative_path: string; sha256: string; size?: number; content_type?: string | null }[]
-        | undefined) ?? [];
-      for (const e of entries) {
-        out.push({
-          segment: seg,
-          relativePath: e.relative_path,
-          sha256: e.sha256,
-          size: e.size,
-          contentType: e.content_type,
-          category: classify(e.relative_path, e.content_type),
-        });
-      }
-    }
-    return out;
-  }, [manifests]);
+  /** Tab/Page 变化时重新拉数据。 */
+  useEffect(() => {
+    if (id) loadFilesPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, activeCategory, page]);
 
-  /** 每个分类的条目数（用于 tab 标签上的 count 徽章）。 */
-  const categoryCounts = useMemo(() => {
-    const counts: Record<Category, number> = {
-      theme: 0, image: 0, video: 0, font: 0, data: 0, other: 0,
+  /** 后端返回的"全分类计数"——和当前 tab 无关，所以一直显示正确总数。 */
+  const categoryCounts: Record<Category, number> = useMemo(() => {
+    const c = filesPage?.categoryCounts ?? {};
+    return {
+      theme: c.theme ?? 0,
+      image: c.image ?? 0,
+      video: c.video ?? 0,
+      font: c.font ?? 0,
+      data: c.data ?? 0,
+      other: c.other ?? 0,
     };
-    for (const e of flatEntries) counts[e.category]++;
-    return counts;
-  }, [flatEntries]);
+  }, [filesPage]);
 
-  /** 当前 tab 过滤后的条目集合（不分页）。 */
-  const filteredEntries = useMemo(() => {
-    if (activeCategory === null) return flatEntries;
-    return flatEntries.filter((e) => e.category === activeCategory);
-  }, [flatEntries, activeCategory]);
-
-  /** 总页数（至少 1，避免空数据时显示 "0 / 0"）。 */
-  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / PAGE_SIZE));
-  /** 当前页对应的切片。page 超界时夹紧到 1。 */
-  const safePage = Math.min(Math.max(1, page), totalPages);
-  const pagedEntries = useMemo(
-    () => filteredEntries.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
-    [filteredEntries, safePage]
+  /** 全部文件数 = 所有 category 之和（这台 tab 的徽章 + 空态判断都用）。 */
+  const totalAll = useMemo(
+    () => Object.values(categoryCounts).reduce((a, b) => a + b, 0),
+    [categoryCounts]
   );
+
+  const items: FilesPageItem[] = filesPage?.items ?? [];
+  const totalPages = Math.max(1, filesPage?.totalPages ?? 1);
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const totalThisFilter = filesPage?.total ?? 0;
 
   /** 切换 tab 时回到第 1 页 */
   function selectCategory(c: Category | null) {
@@ -277,7 +232,7 @@ export default function AssetSnapshotDetailPage() {
       <section className="rounded-lg border bg-background p-4 text-sm">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-medium">
-            文件列表 ({flatEntries.length || d.files?.length || 0})
+            文件列表 ({totalAll || d.files?.length || 0})
           </h2>
           <button
             onClick={() => {
@@ -290,17 +245,17 @@ export default function AssetSnapshotDetailPage() {
             复制 prefix
           </button>
         </div>
-        {manifestsLoading ? (
+        {filesLoading && !filesPage ? (
           <div className="py-3 text-center text-xs text-muted-foreground">
-            正在读取各段 manifest...
+            正在读取文件清单...
           </div>
-        ) : flatEntries.length > 0 ? (
+        ) : totalAll > 0 ? (
           <>
             {/* 分类 tabs */}
             <div className="mb-3 flex flex-wrap gap-1.5 text-xs">
               <CategoryTab
                 label="全部"
-                count={flatEntries.length}
+                count={totalAll}
                 active={activeCategory === null}
                 onClick={() => selectCategory(null)}
               />
@@ -314,6 +269,9 @@ export default function AssetSnapshotDetailPage() {
                   disabled={categoryCounts[c] === 0}
                 />
               ))}
+              {filesLoading && (
+                <span className="self-center text-[10px] text-muted-foreground">加载中…</span>
+              )}
             </div>
 
             <div className="overflow-auto rounded border">
@@ -328,8 +286,8 @@ export default function AssetSnapshotDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pagedEntries.map((e, i) => (
-                    <tr key={i} className="border-t hover:bg-muted/30">
+                  {items.map((e) => (
+                    <tr key={e.id} className="border-t hover:bg-muted/30">
                       <td className="px-2 py-1.5 text-xs">
                         <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
                           {SEGMENT_LABEL[e.segment] ?? e.segment}
@@ -339,13 +297,13 @@ export default function AssetSnapshotDetailPage() {
                       <td className="px-2 py-1.5 text-xs text-muted-foreground">
                         {e.contentType || "-"}
                       </td>
-                      <td className="px-2 py-1.5 text-right">{humanBytes(e.size)}</td>
-                      <td className="px-2 py-1.5 font-mono text-[10px] text-muted-foreground" title={e.sha256}>
+                      <td className="px-2 py-1.5 text-right">{humanBytes(e.size ?? undefined)}</td>
+                      <td className="px-2 py-1.5 font-mono text-[10px] text-muted-foreground" title={e.sha256 ?? undefined}>
                         {e.sha256 ? e.sha256.substring(0, 12) + "…" : "-"}
                       </td>
                     </tr>
                   ))}
-                  {pagedEntries.length === 0 && (
+                  {items.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-2 py-6 text-center text-xs text-muted-foreground">
                         当前分类下没有文件
@@ -359,18 +317,18 @@ export default function AssetSnapshotDetailPage() {
             {/* 分页器 */}
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <div>
-                共 {filteredEntries.length} 条
-                {filteredEntries.length > 0 && (
+                共 {totalThisFilter} 条
+                {totalThisFilter > 0 && (
                   <>
                     {" "}· 第 {(safePage - 1) * PAGE_SIZE + 1}–
-                    {Math.min(safePage * PAGE_SIZE, filteredEntries.length)} 条
+                    {Math.min(safePage * PAGE_SIZE, totalThisFilter)} 条
                   </>
                 )}
               </div>
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => setPage(safePage - 1)}
-                  disabled={safePage <= 1}
+                  disabled={safePage <= 1 || filesLoading}
                   className="rounded border px-2 py-1 hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
                 >
                   上一页
@@ -380,7 +338,7 @@ export default function AssetSnapshotDetailPage() {
                 </span>
                 <button
                   onClick={() => setPage(safePage + 1)}
-                  disabled={safePage >= totalPages}
+                  disabled={safePage >= totalPages || filesLoading}
                   className="rounded border px-2 py-1 hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
                 >
                   下一页
