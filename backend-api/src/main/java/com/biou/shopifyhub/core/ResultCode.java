@@ -20,6 +20,7 @@ public enum ResultCode {
     INVITATION_DURATION_INVALID(20104, "账号有效期必须在 1~90 天之间"),
     INVITATION_PENDING_EXISTS(20105, "该邮箱已有待接受的邀请"),
     INVITATION_ROLE_NOT_ALLOWED(20106, "无权授予该角色"),
+    INVITATION_USERNAME_TAKEN(20107, "该邮箱已被注册为系统用户，请联系管理员处理"),
     AUTH_BAD_CREDENTIALS(20200, "用户名或密码错误"),
     AUTH_ACCOUNT_FROZEN(20201, "账号已冻结"),
     AUTH_ACCOUNT_EXPIRED(20202, "账号已到期"),
