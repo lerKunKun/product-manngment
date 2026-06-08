@@ -26,6 +26,20 @@ import httpx
 log = logging.getLogger(__name__)
 
 
+def _build_progress_url(backend_url: str) -> str:
+    base = backend_url.rstrip("/") if backend_url else ""
+    if not base:
+        return ""
+
+    if base.endswith(("/api/internal/asset/progress", "/internal/asset/progress")):
+        return base
+    if base.endswith(("/api/internal/asset", "/internal/asset")):
+        return f"{base}/progress"
+    if base.endswith("/api"):
+        return f"{base}/internal/asset/progress"
+    return f"{base}/api/internal/asset/progress"
+
+
 class ProgressEmitter:
     """HTTP POST progress events to backend; no-op if ``backend_url`` empty."""
 
@@ -37,6 +51,7 @@ class ProgressEmitter:
         timeout: float = 3.0,
     ) -> None:
         self.backend_url = backend_url.rstrip("/") if backend_url else ""
+        self.progress_url = _build_progress_url(backend_url)
         self.snapshot_id = snapshot_id
         self.internal_token = internal_token
         self.timeout = timeout
@@ -75,7 +90,7 @@ class ProgressEmitter:
                 else {}
             )
             c.post(
-                f"{self.backend_url}/api/internal/asset/progress",
+                self.progress_url,
                 json=payload,
                 headers=headers,
             )

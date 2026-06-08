@@ -69,6 +69,34 @@ def test_emit_posts_payload():
     assert kwargs["headers"] == {"X-Internal-Token": "secret"}
 
 
+def test_emit_accepts_asset_base_url_without_double_prefix():
+    fake_client = MagicMock()
+    with patch("app.services.progress.httpx.Client", return_value=fake_client):
+        emitter = ProgressEmitter(
+            backend_url="http://backend.local/api/internal/asset",
+            snapshot_id=77,
+            internal_token="secret",
+        )
+        emitter.emit("file", progress=0.25, message="templates/index.json")
+
+    args, _ = fake_client.post.call_args
+    assert args[0] == "http://backend.local/api/internal/asset/progress"
+
+
+def test_emit_accepts_api_base_url():
+    fake_client = MagicMock()
+    with patch("app.services.progress.httpx.Client", return_value=fake_client):
+        emitter = ProgressEmitter(
+            backend_url="http://backend.local/api/",
+            snapshot_id=77,
+            internal_token="secret",
+        )
+        emitter.emit("file", progress=0.25, message="templates/index.json")
+
+    args, _ = fake_client.post.call_args
+    assert args[0] == "http://backend.local/api/internal/asset/progress"
+
+
 def test_emit_swallows_errors():
     fake_client = MagicMock()
     fake_client.post.side_effect = httpx.ConnectError("boom")
