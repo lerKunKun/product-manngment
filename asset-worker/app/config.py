@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     app_env: str = "dev"
     app_port: int = 9000
-    asset_worker_token: str = "dev-worker-token"
+    asset_worker_token: str = ""
 
     # R2 / MinIO
     r2_endpoint: str = "http://localhost:9000"

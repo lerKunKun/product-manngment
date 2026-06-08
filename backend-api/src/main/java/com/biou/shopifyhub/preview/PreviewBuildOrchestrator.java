@@ -69,6 +69,9 @@ public class PreviewBuildOrchestrator {
     @Value("${shopify.worker.call-timeout-seconds:120}")
     private long workerTimeoutSeconds;
 
+    @Value("${shopify.worker.token:}")
+    private String workerToken;
+
     public PreviewBuildOrchestrator(PreviewThemeMapper previewMapper,
                                     StoreMapper storeMapper,
                                     StoreService storeService,
@@ -219,13 +222,16 @@ public class PreviewBuildOrchestrator {
             .connectTimeout(Duration.ofSeconds(10))
             .build();
         String json = objectMapper.writeValueAsString(body);
-        HttpRequest req = HttpRequest.newBuilder()
+        HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
             .uri(URI.create(workerBaseUrl + path))
             .timeout(Duration.ofSeconds(workerTimeoutSeconds))
             .header("Content-Type", "application/json")
             .version(HttpClient.Version.HTTP_1_1)
-            .POST(HttpRequest.BodyPublishers.ofString(json))
-            .build();
+            .POST(HttpRequest.BodyPublishers.ofString(json));
+        if (workerToken != null && !workerToken.isBlank()) {
+            reqBuilder.header("X-Worker-Token", workerToken.trim());
+        }
+        HttpRequest req = reqBuilder.build();
         HttpResponse<String> resp;
         try {
             resp = client.send(req, HttpResponse.BodyHandlers.ofString());

@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 
 import boto3
 from botocore.client import Config
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.clients.r2 import R2Client
 from app.config import settings
@@ -19,6 +20,18 @@ from app.routes import pull as pull_routes
 from app.routes import push as push_routes
 
 logger = logging.getLogger(__name__)
+
+_AUTH_EXEMPT_PATHS = {"/", "/health", "/cli/health"}
+
+
+def _extract_worker_token(request: Request) -> str:
+    token = request.headers.get("X-Worker-Token", "")
+    if token:
+        return token
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:]
+    return ""
 
 
 def _build_s3_client():
@@ -83,6 +96,25 @@ app.include_router(pull_routes.router)
 app.include_router(push_routes.router)
 app.include_router(preview_routes.router)
 app.include_router(diff_routes.router)
+
+
+@app.middleware("http")
+async def require_worker_token(request: Request, call_next):
+    if request.method == "OPTIONS" or request.url.path in _AUTH_EXEMPT_PATHS:
+        return await call_next(request)
+
+    expected = settings.asset_worker_token.strip()
+    if not expected:
+        logger.error("ASSET_WORKER_TOKEN is empty; rejecting worker API request")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "ASSET_WORKER_TOKEN is not configured"},
+        )
+
+    if _extract_worker_token(request) != expected:
+        return JSONResponse(status_code=401, content={"detail": "invalid worker token"})
+
+    return await call_next(request)
 
 
 @app.get("/health")

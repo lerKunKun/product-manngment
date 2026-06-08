@@ -55,6 +55,10 @@ app:
   internal:
     token: ${INTERNAL_API_TOKEN:}
 
+shopify:
+  worker:
+    token: ${ASSET_WORKER_TOKEN:}
+
 logging:
   level:
     com.biou.shopifyhub: DEBUG

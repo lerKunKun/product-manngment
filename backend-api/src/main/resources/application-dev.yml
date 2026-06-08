@@ -131,6 +131,7 @@ shopify:
     debounce-seconds: ${SHOPIFY_SNAPSHOT_DEBOUNCE_SECONDS:300}
   worker:
     base-url: ${SHOPIFY_WORKER_BASE_URL:http://localhost:8765}
+    token: ${ASSET_WORKER_TOKEN:dev-worker-token}
     # 主题文件多 / 大店产品图多时 120s 不够；提高到 600s 顶过去；
     # 异步流式拉取留到 Wave 3b 断点续传 Track 一并改造。
     call-timeout-seconds: ${SHOPIFY_WORKER_TIMEOUT_SECONDS:600}
