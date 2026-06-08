@@ -13,7 +13,7 @@ import java.util.Map;
 /**
  * PRODUCT_ACCESS：审批通过后写 sys_data_scope（scope_type=PRODUCT, source=APPROVAL）。
  * payload 期望字段：productId(Long, 必填) / scopeType(String, 默认 PRODUCT) / access(String, 默认 READ) /
- *                  expiresAt(ISO LocalDateTime, 可选)。
+ *                  expiresAt(ISO LocalDateTime, 缺省 now+7d)。
  */
 @Service
 public class ProductAccessApprovalService implements ApprovalTypeHook {
@@ -55,14 +55,23 @@ public class ProductAccessApprovalService implements ApprovalTypeHook {
         ds.setSource("APPROVAL");
         ds.setApprovalId(flow.getId());
         ds.setCrossCompany(Boolean.FALSE);
+        ds.setGrantedBy(grantedBy(flow));
         ds.setGrantedAt(LocalDateTime.now());
+        LocalDateTime expiresAt = null;
         if (p.get("expiresAt") instanceof String es && !es.isBlank()) {
             try {
-                ds.setExpiresAt(LocalDateTime.parse(es));
-            } catch (Exception ignore) { /* payload 内的 expiresAt 非 ISO 时忽略，留 null = 永久 */ }
+                expiresAt = LocalDateTime.parse(es);
+            } catch (Exception ignore) { /* payload 内的 expiresAt 非 ISO 时走默认 7 天 */ }
         }
+        ds.setExpiresAt(expiresAt == null ? LocalDateTime.now().plusDays(7) : expiresAt);
         ds.setStatus("ACTIVE");
         scopeMapper.insert(ds);
+    }
+
+    private static Long grantedBy(ApprovalFlow flow) {
+        if (flow.getDecidedBy() != null) return flow.getDecidedBy();
+        if (flow.getCurrentApproverId() != null) return flow.getCurrentApproverId();
+        return flow.getApplicantId();
     }
 
     private static Long asLong(Object v) {

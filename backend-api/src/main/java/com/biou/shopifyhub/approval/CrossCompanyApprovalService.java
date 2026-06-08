@@ -58,11 +58,18 @@ public class CrossCompanyApprovalService implements ApprovalTypeHook {
         ds.setSource("APPROVAL");
         ds.setApprovalId(flow.getId());
         ds.setCrossCompany(Boolean.TRUE);
+        ds.setGrantedBy(grantedBy(flow));
         ds.setGrantedAt(LocalDateTime.now());
         ds.setExpiresAt(expiresAt);
         ds.setGranterCompanyId(granterCompanyId);
         ds.setStatus("ACTIVE");
         scopeMapper.insert(ds);
+    }
+
+    private static Long grantedBy(ApprovalFlow flow) {
+        if (flow.getDecidedBy() != null) return flow.getDecidedBy();
+        if (flow.getCurrentApproverId() != null) return flow.getCurrentApproverId();
+        return flow.getApplicantId();
     }
 
     private static Long asLong(Object v) {
