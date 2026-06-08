@@ -17,7 +17,7 @@ public class PushConflict {
     private Long productId;
     private Long storeId;
 
-    /** HANDLE_TAKEN / SKU_DUPLICATE / VARIANT_OPTION_MISMATCH / OTHER */
+    /** HANDLE_TAKEN / SKU_DUPLICATE / VARIANT_OPTION_MISMATCH / VALIDATION / OTHER */
     private String conflictType;
 
     private String detailJson;
