@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,8 +25,8 @@ import java.util.Map;
  *       open to anonymous (gated by SecurityConfig allow-list).</li>
  *   <li>{@code POST /internal/asset/progress} — worker callback. Authenticated
  *       via shared secret header {@code X-Internal-Token} matched against
- *       {@code app.internal.token}. Empty/absent config means dev-mode WARN
- *       and accept-all.</li>
+ *       {@code app.internal.token}. Empty/absent config disables the callback
+ *       and returns 503 instead of accepting anonymous calls.</li>
  * </ul>
  */
 @RestController
@@ -45,7 +46,7 @@ public class AssetProgressController {
     @PostConstruct
     void warnIfTokenMissing() {
         if (internalToken == null || internalToken.isBlank()) {
-            log.warn("app.internal.token is empty — /internal/asset/progress accepts all callers (dev mode).");
+            log.error("app.internal.token is empty; /internal/asset/progress will reject callbacks with 503.");
         }
     }
 
@@ -59,7 +60,11 @@ public class AssetProgressController {
         @RequestHeader(value = "X-Internal-Token", required = false) String token,
         @RequestBody Map<String, Object> payload
     ) {
-        if (internalToken != null && !internalToken.isBlank() && !internalToken.equals(token)) {
+        String expectedToken = internalToken == null ? "" : internalToken.trim();
+        if (expectedToken.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
+        if (!expectedToken.equals(token)) {
             return ResponseEntity.status(401).build();
         }
         Object sidObj = payload.get("snapshotId");

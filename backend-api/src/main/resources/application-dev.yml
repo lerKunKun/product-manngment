@@ -61,6 +61,10 @@ notification:
   email:
     enabled: ${NOTIFICATION_EMAIL_ENABLED:false}
 
+app:
+  internal:
+    token: ${INTERNAL_API_TOKEN:dev-internal-token}
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

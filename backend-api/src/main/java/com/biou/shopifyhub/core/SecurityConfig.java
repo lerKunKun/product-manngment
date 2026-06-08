@@ -81,8 +81,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/invitation/preview", "/asset/snapshot/*/events", "/saga/*/events", "/task/*/events").permitAll()
                 .requestMatchers(HttpMethod.POST, "/invitation/accept").permitAll()
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
-                .requestMatchers("/oauth/**", "/webhook/**", "/internal/asset/**").permitAll()
-                .requestMatchers("/internal/**").permitAll()
+                .requestMatchers("/oauth/**", "/webhook/**").permitAll()
+                .requestMatchers(HttpMethod.POST, "/internal/asset/progress").permitAll()
                 .requestMatchers("/ops/backup/**").permitAll()
 
                 // ========== RBAC Phase 2 — URL 粗拦 ==========

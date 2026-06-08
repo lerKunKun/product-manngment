@@ -51,6 +51,10 @@ notification:
   dingtalk:
     enabled: ${NOTIFICATION_DINGTALK_ENABLED:true}
 
+app:
+  internal:
+    token: ${INTERNAL_API_TOKEN:}
+
 logging:
   level:
     com.biou.shopifyhub: DEBUG
